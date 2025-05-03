@@ -27,7 +27,10 @@
 - **Advanced File Recovery**: Specialized tools for recovering encrypted files from known ransomware families
 - **Memory Forensics**: Extracts encryption keys and artifacts from memory dumps
 - **Network Key Recovery**: Analyzes network traffic to capture encryption keys and command-and-control communications
-- **AI-Enhanced Detection**: Machine learning models to identify new ransomware variants
+- **AI-Enhanced Detection**: Machine learning and LLM-based models with 97% accuracy for ransomware detection
+- **Two-Stage Detection System**: Combines traditional ML with LLM-based analysis for comprehensive detection
+- **Multimodal Fusion**: Integrates static, dynamic, and network features with attention mechanisms
+- **Incremental Learning**: Automatically adapts to new ransomware variants and strategies
 - **Threat Intelligence Integration**: Correlates findings with external threat intelligence sources
 - **YARA Rule Generation**: Automatically generates detection rules based on analysis results
 - **Ransomware Relationship Visualization**: Displays connections between different ransomware families and variants
@@ -141,6 +144,8 @@ For detailed documentation, see the `docs/` directory:
 - [Technical Architecture](docs/PROJECT_OVERVIEW.md)
 - [API Reference](docs/IMPLEMENTATION_SUMMARY.md)
 - [Development Guide](docs/FUTURE_DEVELOPMENT_PLAN.md)
+- [Machine Learning Enhancement](docs/MACHINE_LEARNING_ENHANCEMENT.md)
+- [ML Enhancement Update Log](docs/MACHINE_LEARNING_ENHANCEMENT_UPDATE_LOG.md)
 - [LockBit Analysis Case Study](docs/LOCKBIT_DECRYPTION_OPTIMIZATION.md)
 
 ## Contributing

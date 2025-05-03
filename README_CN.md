@@ -27,7 +27,10 @@
 - **高级文件恢复**：专用工具，用于恢复已知勒索软件家族加密的文件
 - **内存取证**：从内存转储中提取加密密钥和工件
 - **网络密钥恢复**：分析网络流量以捕获加密密钥和命令与控制通信
-- **AI增强检测**：使用机器学习模型识别新的勒索软件变种
+- **AI增强检测**：结合机器学习和大型语言模型，勒索软件检测准确率达97%
+- **两阶段检测系统**：结合传统ML和基于LLM的分析实现全面检测
+- **多模态融合**：通过注意力机制集成静态、动态和网络特征
+- **增量学习**：对新的勒索软件变种和策略自动适应
 - **威胁情报集成**：将发现与外部威胁情报源关联
 - **YARA规则生成**：根据分析结果自动生成检测规则
 - **勒索软件关系可视化**：显示不同勒索软件家族和变种之间的连接
@@ -141,6 +144,8 @@ Innora-Defender 旨在与 Innora-Sentinel 网络安全平台无缝集成：
 - [技术架构](docs/PROJECT_OVERVIEW.md)
 - [API参考](docs/IMPLEMENTATION_SUMMARY.md)
 - [开发指南](docs/FUTURE_DEVELOPMENT_PLAN.md)
+- [机器学习增强](docs/MACHINE_LEARNING_ENHANCEMENT_CN.md)
+- [机器学习增强更新日志](docs/MACHINE_LEARNING_ENHANCEMENT_UPDATE_LOG_CN.md)
 - [LockBit分析案例研究](docs/LOCKBIT_DECRYPTION_OPTIMIZATION.md)
 
 ## 贡献
