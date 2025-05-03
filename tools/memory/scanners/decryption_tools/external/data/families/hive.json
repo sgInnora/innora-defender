@@ -1,0 +1,164 @@
+{
+    "name": "Hive Ransomware",
+    "aliases": ["Hive", "rkl"],
+    "first_seen": "2021-06",
+    "active": false,
+    "ransomware_as_service": true,
+    "group_attribution": "Hive Ransomware Group",
+    "countries_targeted": ["global", "with focus on healthcare, education, and critical infrastructure"],
+    "sectors_targeted": ["healthcare", "education", "energy", "financial services", "manufacturing", "IT services"],
+    "description": "Hive was a ransomware-as-a-service operation first observed in June 2021. The group was known for its aggressive targeting of healthcare organizations and critical infrastructure. In January 2023, the FBI successfully infiltrated Hive's infrastructure, seized their servers, and released a decryption tool, effectively disrupting the operation.",
+    "technical_details": {
+        "programming_language": "Go (later variants), initially written in a different language",
+        "key_generation": {
+            "method": "Asymmetric encryption with unique keys per victim",
+            "description": "Uses a hybrid encryption scheme with unique encryption keys for each victim."
+        },
+        "encryption": {
+            "algorithm": ["AES-256", "RSA-2048"],
+            "key_length": [256, 2048],
+            "mode": "CBC for AES encryption",
+            "implementation_details": "Hive encrypts files using AES-256-CBC with randomly generated keys. These keys are then encrypted with an RSA-2048 public key. Early versions had a critical flaw in their encryption implementation."
+        },
+        "extension": [".hive", ".key.hive"],
+        "ransom_note": {
+            "filenames": ["HOW_TO_DECRYPT.txt", "key.hive.txt"],
+            "content_markers": ["Your data was encrypted and exfiltrated", "You need a private key to recover your data", "contact us within 2 days to get a special price"]
+        },
+        "file_markers": {
+            "header": "Encrypted files often begin with the marker 'HIVEv'",
+            "footer": "Includes encrypted file key metadata at the end of the file",
+            "other": "Some variants include victim-specific ID markers in encrypted files"
+        },
+        "network_indicators": {
+            "c2_domains": ["Dynamic command and control infrastructure"],
+            "tor_addresses": ["Various .onion addresses for payment and negotiation portals"]
+        },
+        "execution_behavior": {
+            "persistence": "Generally doesn't establish persistence as encryption completes in one run",
+            "process_injection": "Some variants can inject into legitimate Windows processes",
+            "anti_analysis": [
+                "Checks for debugging environments",
+                "Detects virtual machine environments",
+                "Checks for analysis tools",
+                "Language checks to avoid specific regions"
+            ],
+            "privilege_escalation": "Uses various Windows exploits for privilege escalation",
+            "lateral_movement": "Exploits vulnerable systems on the network for lateral movement"
+        }
+    },
+    "available_decryptors": {
+        "fbi_tool": {
+            "name": "FBI Hive Decryption Tool",
+            "url": "https://www.fbi.gov/news/stories/fbi-helps-victims-of-hive-ransomware",
+            "description": "In January 2023, the FBI seized Hive's infrastructure and developed a decryption tool that was provided to victims worldwide.",
+            "limitations": "Available through FBI and international partners to confirmed Hive victims."
+        },
+        "bitdefender_tool": {
+            "name": "Bitdefender Hive Decryptor",
+            "url": "https://www.bitdefender.com/blog/hotforsecurity/new-free-decryptor-helps-victims-of-hive-ransomware-get-their-files-back/",
+            "description": "In collaboration with law enforcement, Bitdefender released a free Hive decryption tool in April 2023.",
+            "limitations": "Works for Hive variants where encryption implementation flaws were identified."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "Memorial Health System Attack",
+            "date": "2021-08",
+            "description": "Attack on Ohio-based healthcare system that forced hospitals to operate on paper records and cancel surgeries."
+        },
+        {
+            "name": "MediaMarkt Attack",
+            "date": "2021-11",
+            "description": "Major attack on European electronics retailer MediaMarkt, affecting stores across multiple countries with a $240 million ransom demand."
+        },
+        {
+            "name": "Tata Power Attack",
+            "date": "2022-10",
+            "description": "Attack on Indian energy company Tata Power, compromising sensitive data."
+        },
+        {
+            "name": "Consejo Superior de Investigaciones Científicas (CSIC) Attack",
+            "date": "2022-07",
+            "description": "Attack on Spain's largest public research organization, disrupting operations for weeks."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the ransomware executable during encryption",
+            "Temporary files created during encryption (typically deleted afterwards)",
+            "In earlier variants, implementation flaws allowed key recovery from encrypted files"
+        ],
+        "memory_signatures": [
+            "Go runtime signatures for later variants",
+            "AES encryption implementations",
+            "File enumeration patterns",
+            "Key generation and handling routines"
+        ],
+        "extraction_techniques": "Memory forensics during active encryption could potentially recover encryption keys. Early versions had implementation flaws that allowed experts to extract keys directly from encrypted files."
+    },
+    "recovery_strategies": [
+        "Use official FBI or Bitdefender decryptors if available",
+        "For older variants (June 2021 - November 2022), cryptographic flaws may allow key recovery",
+        "Check for Volume Shadow Copies (though Hive attempts to delete these)",
+        "Offline backups are the most reliable recovery method"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule Hive_Ransomware {",
+            "    meta:",
+            "        description = \"Detects Hive ransomware variants\"",
+            "        author = \"Security Researcher\"",
+            "        reference = \"Internal Research\"",
+            "    strings:",
+            "        $header = \"HIVEv\" ascii wide",
+            "        $note1 = \"HOW_TO_DECRYPT.txt\" ascii wide",
+            "        $note2 = \"key.hive.txt\" ascii wide",
+            "        $s1 = \"your data was encrypted and exfiltrated\" ascii wide nocase",
+            "        $s2 = \".onion\" ascii wide",
+            "        $s3 = \"hive\" ascii wide",
+            "        $go = \"Go build ID:\" ascii",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and",
+            "        filesize < 5MB and",
+            "        ($header at 0 or (any of ($note*) and any of ($s*)) or ($go and any of ($s*)))",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: Hive Ransomware Activity",
+            "id: 6b3f8c5d-9214-4b8a-a5e8-2f31e7bcb412",
+            "status: experimental",
+            "description: Detects activities associated with Hive ransomware",
+            "references:",
+            "    - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-321a",
+            "author: Security Researcher",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection_cmds:",
+            "        CommandLine|contains:",
+            "            - 'vssadmin delete shadows /all'",
+            "            - 'wmic shadowcopy delete'",
+            "            - 'bcdedit /set {default} recoveryenabled no'",
+            "            - 'wbadmin delete catalog -quiet'",
+            "            - 'HOW_TO_DECRYPT.txt'",
+            "            - '.hive'",
+            "    selection_reg:",
+            "        CommandLine|contains:",
+            "            - 'reg add HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters /v MaxMpxCt /d 65535 /t REG_DWORD /f'",
+            "    condition: selection_cmds or selection_reg",
+            "falsepositives: Some legitimate administrative activities",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-321a",
+        "https://www.fbi.gov/news/stories/fbi-helps-victims-of-hive-ransomware",
+        "https://www.bitdefender.com/blog/hotforsecurity/new-free-decryptor-helps-victims-of-hive-ransomware-get-their-files-back/",
+        "https://www.varonis.com/blog/hive-ransomware",
+        "https://www.microsoft.com/en-us/security/blog/2022/07/05/hive-ransomware-gets-upgrades-in-rust/",
+        "https://unit42.paloaltonetworks.com/hive-ransomware/"
+    ],
+    "last_updated": "2025-05-02"
+}

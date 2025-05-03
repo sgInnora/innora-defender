@@ -1,0 +1,53 @@
+{
+  "feature_extractor": {
+    "backend": "pytorch",
+    "feature_dim": 256,
+    "auto_initialize": true,
+    "scaling_factors": {
+      "max_values": [
+        100, 100, 100, 500, 300, 10000, 10000, 
+        1000, 1000, 1000, 1000, 5000, 
+        100, 100, 100, 100, 100, 
+        8.0, 8.0, 30, 1000, 1000
+      ]
+    }
+  },
+  "embedding_model": {
+    "backend": "pytorch",
+    "input_dim": 22,
+    "embedding_dim": 256,
+    "hidden_layers": [512, 256],
+    "dropout_rate": 0.3,
+    "auto_initialize": true
+  },
+  "classifier_model": {
+    "backend": "pytorch",
+    "input_dim": 256,
+    "num_classes": 10,
+    "hidden_layers": [128, 64],
+    "dropout_rate": 0.3,
+    "auto_initialize": true,
+    "class_names": [
+      "lockbit",
+      "ryuk",
+      "revil",
+      "darkside",
+      "conti",
+      "maze",
+      "ragnar",
+      "blackcat",
+      "hive",
+      "wannacry"
+    ]
+  },
+  "variant_detector": {
+    "similarity_threshold": 0.85,
+    "auto_initialize": true
+  },
+  "paths": {
+    "models_dir": "ai_detection/models",
+    "features_dir": "ai_detection/features",
+    "data_dir": "ai_detection/data",
+    "reference_embeddings": "ai_detection/data/reference_embeddings.json"
+  }
+}

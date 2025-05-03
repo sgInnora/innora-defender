@@ -1,0 +1,28 @@
+FROM ubuntu:20.04
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-dev \
+    dnsutils iptables net-tools tcpdump \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/fakenet
+
+# 安装FakeNet-NG
+RUN pip3 install dnspython pyopenssl dnslib dpkt ipaddress
+
+# 复制预先下载的FakeNet-NG
+COPY ../../../tools/network/fakenet /opt/fakenet
+
+# 创建日志目录
+RUN mkdir -p /logs
+
+# 配置文件
+COPY fakenet.conf /opt/fakenet/
+
+# 开放端口
+EXPOSE 80 443 53/udp 21 25 53/tcp
+
+# 设置入口点
+ENTRYPOINT ["python3", "-m", "fakenet.fakenet", "-c", "fakenet.conf"]
+EOF < /dev/null

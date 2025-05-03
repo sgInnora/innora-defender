@@ -1,0 +1,14 @@
+{
+  "timestamp": "2025-05-03T12:06:25.983892",
+  "keys": {
+    "key1": {
+      "key": "deadbeef",
+      "iv": "0123456789abcdef",
+      "algorithm": "AES-256-CBC",
+      "files": [
+        "file1.txt",
+        "file2.txt"
+      ]
+    }
+  }
+}

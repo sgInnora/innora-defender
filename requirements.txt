@@ -1,0 +1,39 @@
+# Core dependencies
+cryptography>=36.0.0
+pycryptodome>=3.14.1
+requests>=2.27.1
+pyyaml>=6.0
+tqdm>=4.62.3
+
+# Analysis tools
+yara-python>=4.2.0
+ssdeep>=3.4
+pyelftools>=0.28
+pefile>=2022.5.30
+binwalk>=2.3.3
+
+# Memory analysis
+volatility3>=2.0.0
+pymem>=1.10.0
+
+# Network analysis
+scapy>=2.4.5
+dpkt>=1.9.7
+
+# AI/ML components
+numpy>=1.20.0
+scipy>=1.8.0
+scikit-learn>=1.0.2
+tensorflow>=2.8.0  # Optional - uncomment if needed
+# torch>=1.10.0     # Optional - uncomment if needed
+
+# Web components
+flask>=2.0.1       # Optional - for web interface
+# flask-restful>=0.3.9  # Optional - for REST API
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# Documentation
+sphinx>=4.4.0      # Optional - for documentation building

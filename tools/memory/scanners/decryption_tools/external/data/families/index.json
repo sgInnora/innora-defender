@@ -1,0 +1,126 @@
+{
+    "version": "2.0",
+    "last_updated": "2025-05-02",
+    "families_count": 8,
+    "families": [
+        {
+            "id": "wannacry",
+            "name": "WannaCry",
+            "aliases": ["WannaCrypt", "WanaCrypt0r", "Wana Decrypt0r"],
+            "first_seen": "2017-05",
+            "active": false,
+            "decryptors_available": true,
+            "description": "Global ransomware attack exploiting EternalBlue vulnerability, notable for rapid spread and impact on critical infrastructure."
+        },
+        {
+            "id": "stop_djvu",
+            "name": "STOP/Djvu",
+            "aliases": ["STOP", "Djvu", "DJVU"],
+            "first_seen": "2018-12",
+            "active": true,
+            "decryptors_available": true,
+            "description": "One of the most widespread ransomware families targeting home users, distributed primarily through cracked software."
+        },
+        {
+            "id": "ryuk",
+            "name": "Ryuk",
+            "aliases": ["RYUK", "Hermes"],
+            "first_seen": "2018-08",
+            "active": false,
+            "decryptors_available": false,
+            "description": "Sophisticated ransomware targeting enterprises and critical infrastructure, known for its targeted approach and high ransom demands."
+        },
+        {
+            "id": "revil",
+            "name": "REvil/Sodinokibi",
+            "aliases": ["Sodinokibi", "REvil", "Sodin"],
+            "first_seen": "2019-04",
+            "active": false,
+            "decryptors_available": true,
+            "description": "Sophisticated RaaS operation known for high-profile attacks including Kaseya supply chain attack and JBS Foods."
+        },
+        {
+            "id": "lockbit",
+            "name": "LockBit",
+            "aliases": ["LockBit 2.0", "LockBit 3.0", "LockBit Black", "ABCD"],
+            "first_seen": "2019-09",
+            "active": true,
+            "decryptors_available": true,
+            "description": "Highly active ransomware group operating advanced RaaS program with self-spreading capabilities and enhanced encryption."
+        },
+        {
+            "id": "blackcat",
+            "name": "BlackCat/ALPHV",
+            "aliases": ["BlackCat", "ALPHV", "Noberus"],
+            "first_seen": "2021-11",
+            "active": true,
+            "decryptors_available": false,
+            "description": "Modern ransomware written in Rust with cross-platform capabilities, known for its technical sophistication and triple extortion tactics."
+        },
+        {
+            "id": "conti",
+            "name": "Conti",
+            "aliases": ["Conti Ransomware", "Ryuk variant"],
+            "first_seen": "2020-05",
+            "active": false,
+            "decryptors_available": false,
+            "description": "Aggressive RaaS operation known for targeting critical infrastructure, dismantled after ContiLeaks but members fragmented to other groups."
+        },
+        {
+            "id": "hive",
+            "name": "Hive Ransomware",
+            "aliases": ["Hive", "rkl"],
+            "first_seen": "2021-06",
+            "active": false,
+            "decryptors_available": true,
+            "description": "RaaS operation targeting healthcare and critical infrastructure, disrupted by FBI operation that seized their infrastructure and released decryption keys."
+        }
+    ],
+    "tags": {
+        "active": ["stop_djvu", "lockbit", "blackcat"],
+        "inactive": ["wannacry", "ryuk", "revil", "conti", "hive"],
+        "has_decryptor": ["wannacry", "stop_djvu", "revil", "lockbit", "hive"],
+        "no_decryptor": ["ryuk", "blackcat", "conti"],
+        "by_sector": {
+            "healthcare": ["ryuk", "revil", "lockbit", "blackcat", "conti", "hive"],
+            "critical_infrastructure": ["wannacry", "ryuk", "conti", "hive"],
+            "government": ["wannacry", "revil", "lockbit", "conti"],
+            "education": ["ryuk", "conti", "hive"],
+            "finance": ["ryuk", "revil", "lockbit", "blackcat", "conti", "hive"],
+            "manufacturing": ["revil", "lockbit", "blackcat", "conti"]
+        },
+        "encryption_algorithm": {
+            "aes": ["wannacry", "stop_djvu", "ryuk", "lockbit", "blackcat", "conti", "hive"],
+            "rsa": ["wannacry", "stop_djvu", "ryuk", "revil", "lockbit", "blackcat", "conti", "hive"],
+            "chacha20": ["blackcat"],
+            "salsa20": ["revil"]
+        },
+        "notable_features": {
+            "worm_capabilities": ["wannacry", "lockbit"],
+            "double_extortion": ["revil", "lockbit", "blackcat", "conti", "hive"],
+            "triple_extortion": ["blackcat"],
+            "rust_implementation": ["blackcat"],
+            "multi_threading": ["lockbit", "conti"],
+            "cross_platform": ["blackcat"]
+        }
+    },
+    "decryption_resources": {
+        "no_more_ransom": "https://www.nomoreransom.org/",
+        "emsisoft_ransomware_resources": "https://www.emsisoft.com/en/ransomware-decryption/",
+        "kaspersky_nomoreransom": "https://noransom.kaspersky.com/",
+        "europol_nomoreransom": "https://www.europol.europa.eu/partners-agreements/no-more-ransom",
+        "bitdefender_tools": "https://www.bitdefender.com/consumer/support/answer/22152/"
+    },
+    "memory_forensics_techniques": {
+        "key_extraction": "Memory forensics during active encryption processes can potentially recover encryption keys before they're wiped.",
+        "timing_importance": "Memory acquisition timing is critical - must capture memory during the encryption process.",
+        "volatility_plugins": "Specialized Volatility plugins can help identify and extract cryptographic material from memory dumps.",
+        "recommended_tools": [
+            "Volatility Framework",
+            "Rekall Memory Forensic Framework",
+            "WinDbg with memory analysis extensions",
+            "Magnet RAM Capture",
+            "DumpIt Memory Acquisition"
+        ]
+    }
+}

@@ -1,0 +1,153 @@
+{
+    "name": "Conti",
+    "aliases": ["Conti Ransomware", "Ryuk variant"],
+    "first_seen": "2020-05",
+    "active": false,
+    "ransomware_as_service": true,
+    "group_attribution": "Wizard Spider (also affiliated with TrickBot and BazarLoader)",
+    "countries_targeted": ["global", "with focus on Western organizations"],
+    "sectors_targeted": ["healthcare", "government", "emergency services", "critical infrastructure", "manufacturing", "finance"],
+    "description": "Conti was a sophisticated ransomware operation run by the Wizard Spider criminal group. It gained notoriety for its aggressive tactics, professional operation, and targeting of critical infrastructure. The group officially shut down in May 2022 after the ContiLeaks, but members fragmented into other ransomware operations.",
+    "technical_details": {
+        "programming_language": "C/C++",
+        "key_generation": {
+            "method": "Asymmetric encryption with unique keys per victim",
+            "description": "Uses a hybrid encryption approach with AES for file encryption and RSA for key protection."
+        },
+        "encryption": {
+            "algorithm": "AES-256",
+            "key_length": 256,
+            "mode": "CBC",
+            "implementation_details": "Conti uses AES-256-CBC for file encryption with a unique key per file. The file encryption key is then encrypted with an RSA-4096 public key. Employs multi-threading for rapid encryption with up to 32 concurrent threads."
+        },
+        "extension": [".CONTI", ".CgTnS"],
+        "ransom_note": {
+            "filenames": ["CONTI_README.txt", "readme.txt"],
+            "content_markers": ["All of your files are currently encrypted", "Conti Decryption Service", "We have also downloaded a pack of sensitive information from your network"]
+        },
+        "file_markers": {
+            "header": "No consistent header marker",
+            "footer": "Often appends the encrypted file key and metadata at the end of files",
+            "other": "Maintains original file headers for some file types to aid file identification"
+        },
+        "network_indicators": {
+            "c2_domains": ["Dynamically generated, often using legitimate cloud services for command and control"],
+            "tor_addresses": ["Multiple .onion addresses for payment portals and data leak sites"]
+        },
+        "execution_behavior": {
+            "persistence": "Usually doesn't establish persistence as the encryption completes in one run",
+            "process_injection": "Can inject into legitimate processes to evade detection",
+            "anti_analysis": [
+                "Detects virtual environments",
+                "Employs anti-debugging techniques",
+                "Checks for security software",
+                "Uses Russian language system checks to avoid CIS countries"
+            ],
+            "privilege_escalation": "Uses various techniques to gain SYSTEM privileges",
+            "lateral_movement": "Leverages Windows networking features, compromised domain credentials, and SMB for lateral movement across networks"
+        }
+    },
+    "available_decryptors": {
+        "no_universal_decryptor": {
+            "name": "No Universal Decryptor Available",
+            "description": "As of 2025, there is no universal free decryptor for Conti ransomware. Some cybersecurity companies and law enforcement agencies may have specific decryption capabilities for certain variants based on technical flaws or seized keys."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "HSE Ireland Attack",
+            "date": "2021-05",
+            "description": "Major attack on Ireland's Health Service Executive (HSE) that severely disrupted healthcare services across the country."
+        },
+        {
+            "name": "Costa Rica Government Attack",
+            "date": "2022-04",
+            "description": "Large-scale attack on multiple Costa Rican government ministries, leading to a declaration of national emergency."
+        },
+        {
+            "name": "Broward County Public Schools",
+            "date": "2021-03",
+            "description": "Attack on the sixth-largest school district in the US, with a demand for $40 million ransom."
+        },
+        {
+            "name": "JVCKenwood Attack",
+            "date": "2022-02",
+            "description": "Attack on Japanese electronics manufacturer JVCKenwood with significant data exfiltration."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the ransomware executable during encryption",
+            "Temporary files created during the encryption process (typically deleted after use)",
+            "Network traffic may contain key material in certain scenarios"
+        ],
+        "memory_signatures": [
+            "AES encryption implementation patterns",
+            "Multi-threading structures for parallel encryption",
+            "File enumeration patterns",
+            "RSA key handling routines"
+        ],
+        "extraction_techniques": "Memory forensics during active encryption may potentially recover encryption keys before they're wiped from memory. For certain versions, implementation flaws have allowed recovery of keys from memory dumps."
+    },
+    "recovery_strategies": [
+        "No universal decryptor is available; recovery typically depends on backups",
+        "Check for Volume Shadow Copies (though Conti typically attempts to delete these)",
+        "Some older variants had implementation flaws that could be exploited for recovery",
+        "Conti sometimes skips certain file types and directories, which may remain intact"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule Conti_Ransomware {",
+            "    meta:",
+            "        description = \"Detects Conti ransomware\"",
+            "        author = \"Security Researcher\"",
+            "        reference = \"Internal Research\"",
+            "    strings:",
+            "        $s1 = \"CONTI_README.txt\" ascii wide",
+            "        $s2 = \"Conti Decryption Service\" ascii wide nocase",
+            "        $s3 = \".onion\" ascii wide",
+            "        $s4 = \"All of your files are currently encrypted\" ascii wide",
+            "        $code1 = { 48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B F9 48 8B D9 }",
+            "        $code2 = { 40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 48 8B CB }",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and",
+            "        filesize < 5MB and",
+            "        (2 of ($s*) or any of ($code*))",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: Conti Ransomware Activity",
+            "id: 43e4b7c6-714c-4947-b538-ddbb4db2ca4e",
+            "status: experimental",
+            "description: Detects activities associated with Conti ransomware",
+            "references:",
+            "    - https://www.cisa.gov/news-events/cybersecurity-advisories/aa21-265a",
+            "author: Security Researcher",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection_cmds:",
+            "        CommandLine|contains:",
+            "            - 'vssadmin delete shadows /all'",
+            "            - 'bcdedit /set {default} recoveryenabled no'",
+            "            - 'bcdedit /set {default} bootstatuspolicy ignoreallfailures'",
+            "            - 'wbadmin delete catalog -quiet'",
+            "            - 'CONTI_README.txt'",
+            "    selection_process:",
+            "        Image|endswith: '\\conti.exe'",
+            "    condition: selection_cmds or selection_process",
+            "falsepositives: Some legitimate administrative activities",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa21-265a",
+        "https://www.mandiant.com/resources/blog/screenshots-leak-expose-conti-ransomware",
+        "https://www.advanced-intel.com/post/anatomy-of-attack-inside-conti-ransomware",
+        "https://unit42.paloaltonetworks.com/conti-ransomware-gang/",
+        "https://www.emsisoft.com/en/blog/40161/conti-ransomware/",
+        "https://news.sophos.com/en-us/2021/02/16/what-to-expect-when-youve-been-hit-with-conti-ransomware/"
+    ],
+    "last_updated": "2025-05-02"
+}

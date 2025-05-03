@@ -1,0 +1,75 @@
+{
+  "name": "WannaCry",
+  "aliases": ["WannaCrypt", "WCry", "WanaCrypt0r"],
+  "first_seen": "2017-05-12",
+  "description": "WannaCry is a ransomware worm that spread rapidly in May 2017, leveraging the NSA-developed EternalBlue exploit targeting SMB vulnerabilities in Windows systems.",
+  "encryption": {
+    "algorithms": ["RSA-2048", "AES-128-CBC"],
+    "implementation": "WannaCry uses a two-stage encryption process. It first generates an AES key for each file, then encrypts the file using AES-128-CBC. The AES key is encrypted with a RSA-2048 public key.",
+    "file_marker": "WANACRY!",
+    "extensions": [".wncry", ".wcry", ".wncrypt", ".wncryt"],
+    "weaknesses": "The original versions of WannaCry had a critical flaw that allowed key recovery from memory if the system remained running after infection"
+  },
+  "ransom_notes": [
+    "@Please_Read_Me@.txt", 
+    "!Please Read Me!.txt"
+  ],
+  "decryption_tools": [
+    {
+      "name": "WanaKiwi",
+      "url": "https://github.com/gentilkiwi/wanakiwi",
+      "description": "Tool by Benjamin Delpy (gentilkiwi) that exploits a vulnerability in WannaCry's encryption implementation to recover the private RSA key from memory",
+      "effectiveness": "High - works if the system was not rebooted since infection",
+      "instructions": "Run WanaKiwi on the infected system to attempt to extract the private keys from memory" 
+    },
+    {
+      "name": "Kaspersky RakhniDecryptor",
+      "url": "https://nomore.kaspersky.com/",
+      "description": "General decryption tool that supports WannaCry decryption",
+      "effectiveness": "Medium - works for some variants"
+    },
+    {
+      "name": "McAfee Ransomware Recover (Mr2)",
+      "url": "https://github.com/advanced-threat-research/mr2",
+      "description": "Open-source tool from McAfee that includes WannaCry decryption capabilities",
+      "effectiveness": "Medium - works for specific variants"
+    }
+  ],
+  "detection": {
+    "yara_rules": [
+      "rule WannaCry {",
+      "    strings:",
+      "        $header = \"WANACRY!\"",
+      "        $msg = \"wanacrypt0r\"",
+      "        $mutex = \"MsWinZonesCacheCounterMutexA\"",
+      "    condition:",
+      "        any of them",
+      "}"
+    ],
+    "file_markers": ["WANACRY!"],
+    "registry_artifacts": ["HKEY_LOCAL_MACHINE\\SOFTWARE\\WanaCrypt0r"]
+  },
+  "key_recovery": {
+    "methods": [
+      "Memory analysis to extract prime numbers",
+      "Memory scanning for pre-generated encryption keys",
+      "Scan for .eky and .dky files in C:\\ProgramData"
+    ],
+    "success_rate": "High if the system was not rebooted after infection"
+  },
+  "technical_details": {
+    "propagation": "Uses EternalBlue exploit (MS17-010) to spread across networks",
+    "bitcoin_addresses": [
+      "13AM4VW2dhxYgXeQepoHkHSQuy6NgaEb94", 
+      "12t9YDPgwueZ9NyMgw519p7AA8isjr6SMw", 
+      "115p7UMMngoj1pMvkpHijcRdfJNXj6LrLn"
+    ],
+    "kill_switch": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
+  },
+  "references": [
+    "https://www.secureworks.com/research/wcry-ransomware-analysis",
+    "https://blog.malwarebytes.com/threat-analysis/2017/05/the-worm-that-spreads-wanacrypt0r/",
+    "https://www.symantec.com/security-center/writeup/2017-051310-3522-99",
+    "https://www.kaspersky.com/blog/wannacry-ransomware/16518/"
+  ]
+}

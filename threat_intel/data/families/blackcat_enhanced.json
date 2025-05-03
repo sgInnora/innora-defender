@@ -1,0 +1,399 @@
+{
+    "name": "BlackCat/ALPHV",
+    "aliases": ["BlackCat", "ALPHV", "Noberus", "Black Cat"],
+    "first_seen": "2021-11",
+    "active": true,
+    "ransomware_as_service": true,
+    "group_attribution": "Former DARKSIDE/BlackMatter affiliates",
+    "countries_targeted": ["global", "united_states", "europe", "australia", "japan"],
+    "sectors_targeted": ["healthcare", "finance", "government", "manufacturing", "education", "technology", "critical_infrastructure"],
+    "description": "BlackCat (also known as ALPHV) is a sophisticated ransomware-as-a-service (RaaS) operation written in Rust, representing one of the first major ransomware families to use this programming language. It emerged in November 2021 and is believed to be operated by former DARKSIDE/BlackMatter affiliates. The group is known for its triple-extortion tactics, sophisticated negotiation portal, and cross-platform capabilities targeting Windows, Linux, and VMware ESXi systems.",
+    "technical_details": {
+        "programming_language": "Rust",
+        "key_generation": {
+            "method": "Unique per victim",
+            "description": "BlackCat generates unique keys for each victim and for each encrypted file. The master key used for encryption is secured with an RSA public key specific to the victim."
+        },
+        "encryption": {
+            "algorithm": "ChaCha20",
+            "key_length": 256,
+            "mode": "Stream cipher",
+            "implementation_details": "BlackCat primarily uses ChaCha20 for file encryption due to its speed and security. Some variants also offer AES-256 as an alternative encryption algorithm based on configuration options."
+        },
+        "extension": [".alphv", ".blackc", ".cat", ".bc", ".sop4", ".enc", ".dark", ".mm", ".id-random_string"],
+        "ransom_note": {
+            "filenames": ["RECOVER-[victim_id]-FILES.txt", "README.txt", "blackcat_readme.txt", "RECOVER-[victim_id]-FILES.onion.txt"],
+            "content_markers": [
+                "YOUR NETWORK HAS BEEN COMPROMISED",
+                "ALL YOUR FILES ARE ENCRYPTED",
+                "ALPHV/BlackCat",
+                "DATA LEAK SITE",
+                "RECOVERY KEY",
+                "victim ID",
+                "RESTORE YOUR FILES",
+                "PAYMENT",
+                "[Tor address].onion"
+            ]
+        },
+        "file_markers": {
+            "header": "BlackCat doesn't add a consistent header to encrypted files",
+            "footer": "File metadata including encryption details is stored separately",
+            "other": "BlackCat creates a recovery file with the victim ID and encryption information"
+        },
+        "network_indicators": {
+            "c2_domains": ["Dynamic and unique per campaign"],
+            "tor_addresses": ["alphvuzxyxv6ylumd7cpbwxms5qfvjrxjpuahsfuwykrqgfejycbxid.onion", "mu75ltv3lxd24dbyu6gtvmnwybecigs5auki7fxim7f4rdfebrqznad.onion"]
+        },
+        "execution_behavior": {
+            "persistence": "BlackCat typically doesn't establish persistence as it completes encryption in a single run",
+            "process_injection": "Injects into legitimate Windows processes to evade detection",
+            "anti_analysis": [
+                "Uses Rust's strong type system and memory safety to resist reverse engineering",
+                "Configurable execution options to evade detection",
+                "Command-line arguments control encryption behavior",
+                "Can detect sandboxes and virtual environments",
+                "Employs obfuscation techniques",
+                "Can be configured to avoid specific countries or domains"
+            ],
+            "privilege_escalation": "Uses valid credentials obtained during network reconnaissance or exploits vulnerabilities to gain SYSTEM privileges",
+            "lateral_movement": "Uses SMB and WMI for movement across Windows networks, SSH for Linux environments, and exploits vulnerabilities in ESXi for virtualization environments"
+        }
+    },
+    "available_decryptors": {
+        "no_public_decryptor": {
+            "name": "No public decryptor available",
+            "description": "Currently, there is no publicly available free decryption tool for BlackCat/ALPHV ransomware. Victims must either restore from backups or negotiate with the attackers.",
+            "limitations": "Full file recovery without paying the ransom is generally not possible without clean backups."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "Swissport International",
+            "date": "2022-02",
+            "description": "Attack on aviation services company Swissport affected operations at multiple airports."
+        },
+        {
+            "name": "EMEA electronics manufacturer",
+            "date": "2022-03",
+            "description": "Major electronics manufacturer in EMEA suffered significant operational disruption."
+        },
+        {
+            "name": "Florida International University",
+            "date": "2022-04",
+            "description": "Attack compromised personal information of students and staff."
+        },
+        {
+            "name": "DESFA",
+            "date": "2022-08",
+            "description": "Attack on Greece's natural gas operator DESFA."
+        },
+        {
+            "name": "Creos and Encevo",
+            "date": "2022-07",
+            "description": "Attack on Luxembourg energy companies Creos and Encevo."
+        },
+        {
+            "name": "Westland Municipality",
+            "date": "2023-01",
+            "description": "Attack on Westland municipality in the Netherlands."
+        },
+        {
+            "name": "Baron Metals",
+            "date": "2023-02",
+            "description": "Attack on US-based metal recycling company."
+        },
+        {
+            "name": "Ludwig Pfeiffer",
+            "date": "2023-03",
+            "description": "Attack on German construction company with global operations."
+        },
+        {
+            "name": "Continental",
+            "date": "2022-11",
+            "description": "Major attack on automotive supplier Continental with data theft of 40TB."
+        },
+        {
+            "name": "IDT Service GmbH",
+            "date": "2023-02",
+            "description": "Attack on German company IDT Service GmbH."
+        },
+        {
+            "name": "Artear",
+            "date": "2023-10",
+            "description": "Attack on Argentina's largest TV network."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the Rust executable during encryption",
+            "Command line parameters may contain configuration details",
+            "Memory regions with encryption keys before wiping"
+        ],
+        "memory_signatures": [
+            "ChaCha20 implementation in Rust",
+            "Embedded Tor client communications",
+            "File enumeration patterns",
+            "Rust memory allocation patterns",
+            "BlackCat configuration structures"
+        ],
+        "extraction_techniques": "Memory acquisition during active encryption process offers the best chance for key recovery. Look for ChaCha20 implementation patterns and key schedules in memory."
+    },
+    "recovery_strategies": [
+        "Offline backups are the most reliable recovery method",
+        "Check for Volume Shadow Copies if not explicitly deleted",
+        "Examine system for any plaintext copies of critical files",
+        "In some cases, specific file types may be skipped during encryption",
+        "Law enforcement collaboration may provide access to seized infrastructure"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule BlackCat_Ransomware {",
+            "    meta:",
+            "        description = \"Detects BlackCat/ALPHV ransomware\"",
+            "        author = \"Security Researcher\"",
+            "        reference = \"Internal Analysis\"",
+            "        family = \"BlackCat\"",
+            "        variant = \"ALPHV\"",
+            "    strings:",
+            "        $rust1 = \"rust_panic\" ascii wide",
+            "        $rust2 = \"rust_begin_unwind\" ascii wide",
+            "        $str1 = \"ALPHV\" ascii wide",
+            "        $str2 = \"BlackCat\" ascii wide",
+            "        $str3 = \".onion\" ascii wide",
+            "        $config1 = \"no_net\" ascii wide",
+            "        $config2 = \"no_vm\" ascii wide",
+            "        $config3 = \"no_shares\" ascii wide",
+            "        $code1 = { 89 F8 41 89 DA 48 29 F8 49 89 F9 48 C1 E0 03 }",
+            "        $code2 = { 48 8D 8C 24 ?? ?? ?? ?? 48 89 C3 FF 15 ?? ?? ?? ?? }",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and",
+            "        filesize < 15MB and",
+            "        (2 of ($rust*) and 2 of ($str*) and 1 of ($config*)) or",
+            "        (1 of ($rust*) and 1 of ($str*) and any of ($code*))",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: BlackCat Ransomware Execution",
+            "id: 5c8f7016-2f0e-4bb8-8005-349f5a7d45b8",
+            "status: experimental",
+            "description: Detects BlackCat/ALPHV ransomware execution based on command-line parameters",
+            "references:",
+            "    - https://www.varonis.com/blog/blackcat-ransomware",
+            "    - https://news.sophos.com/en-us/2022/07/14/blackcat-ransomware-attacks-not-merely-a-byproduct-of-bad-luck/",
+            "author: Security Researcher",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection_cmd:",
+            "        CommandLine|contains:",
+            "            - '--network-only'",
+            "            - '--no-prop'",
+            "            - '--path'",
+            "            - '--size-limit'",
+            "            - '--no-vm'",
+            "            - '--vmcheck'",
+            "            - '--child'",
+            "    selection_ext:",
+            "        CommandLine|endswith:",
+            "            - '.alphv'",
+            "            - '.blackc'",
+            "    selection_delete:",
+            "        CommandLine|contains:",
+            "            - 'vssadmin delete shadows'",
+            "            - 'wmic shadowcopy delete'",
+            "            - 'wbadmin delete catalog'",
+            "    condition: selection_cmd or selection_ext or selection_delete",
+            "falsepositives: Unlikely",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.varonis.com/blog/blackcat-ransomware",
+        "https://news.sophos.com/en-us/2022/07/14/blackcat-ransomware-attacks-not-merely-a-byproduct-of-bad-luck/",
+        "https://www.cisa.gov/sites/default/files/2023-02/aa23-061a_stopransomware_blackcat_alphv.pdf",
+        "https://blogs.blackberry.com/en/2022/01/blackcat-ransomware-highly-configurable-rust-driven-raas",
+        "https://www.trendmicro.com/en_us/research/22/e/examining-the-black-cat-ransomware.html",
+        "https://securityscorecard.pathfactory.com/research/blackcat-ransomware",
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-040a",
+        "https://www.ic3.gov/Media/News/2022/220420.pdf",
+        "https://therecord.media/blackcat-ransomware-allegedly-behind-attack-on-european-gas-companies"
+    ],
+    "last_updated": "2025-05-02",
+    "variants": [
+        {
+            "name": "ALPHV",
+            "first_seen": "2021-11",
+            "distinctive_features": "Original variant, often referred to by its ransom note name",
+            "detection_indicators": "Creates .alphv extension and RECOVER-FILES.txt ransom note"
+        },
+        {
+            "name": "BlackCat 1.1",
+            "first_seen": "2022-01",
+            "distinctive_features": "Added ESXi targeting capabilities, improved encryption speed",
+            "detection_indicators": "Added --vmware command line flag, customizable extensions"
+        },
+        {
+            "name": "BlackCat 1.2",
+            "first_seen": "2022-03",
+            "distinctive_features": "Enhanced anti-analysis, improved lateral movement",
+            "detection_indicators": "Added --no-vm, --no-shares, more complex configuration options"
+        },
+        {
+            "name": "BlackCat 1.3",
+            "first_seen": "2022-06",
+            "distinctive_features": "Multi-platform updates, faster file scanning",
+            "detection_indicators": "Improved Linux and ESXi encryption, more command-line options"
+        },
+        {
+            "name": "BlackCat 1.4",
+            "first_seen": "2022-08",
+            "distinctive_features": "Changed encryption format, improved evasion techniques",
+            "detection_indicators": "New file extensions and ransom note patterns, refined encryption method"
+        },
+        {
+            "name": "BlackCat 1.5",
+            "first_seen": "2022-10",
+            "distinctive_features": "Introduced triple extortion, enhanced data exfiltration",
+            "detection_indicators": "More network traffic pre-encryption, expanded command options"
+        },
+        {
+            "name": "BlackCat 1.6",
+            "first_seen": "2023-01",
+            "distinctive_features": "Further anti-analysis improvements, refined execution flow",
+            "detection_indicators": "More sophisticated countermeasures, refined binary structure"
+        },
+        {
+            "name": "BlackCat 1.7",
+            "first_seen": "2023-04",
+            "distinctive_features": "Enhanced credential harvesting, improved targeting capabilities",
+            "detection_indicators": "Added new command-line options for credential extraction"
+        },
+        {
+            "name": "BlackCat 1.8",
+            "first_seen": "2023-07",
+            "distinctive_features": "Added self-propagation capabilities, refined targeting",
+            "detection_indicators": "New lateral movement functions, enhanced command-line options"
+        },
+        {
+            "name": "BlackCat 2.0",
+            "first_seen": "2023-10",
+            "distinctive_features": "Major rewrite with enhanced performance and evasion",
+            "detection_indicators": "Changed binary structure, new encryption method signatures"
+        },
+        {
+            "name": "Noberus",
+            "first_seen": "2022-04",
+            "distinctive_features": "Alternate name used by some security vendors",
+            "detection_indicators": "Functionally identical to BlackCat, naming convention difference"
+        }
+    ],
+    "cross_platform": {
+        "windows": {
+            "characteristics": "Primary target platform, uses Windows API for system operations",
+            "indicators": "PE32+ executable, Windows API imports, NTFS-specific operations"
+        },
+        "linux": {
+            "characteristics": "Dedicated Linux variant targeting enterprise servers",
+            "indicators": "ELF format, Linux system calls, targeted enterprise distributions"
+        },
+        "esxi": {
+            "characteristics": "Specialized for VMware ESXi virtualization environments",
+            "indicators": "Direct VMDK file targeting, ESXi shell commands, VM suspension"
+        }
+    },
+    "ttps": [
+        {
+            "id": "T1486",
+            "name": "Data Encrypted for Impact",
+            "description": "BlackCat encrypts data on target systems using ChaCha20 or AES-256"
+        },
+        {
+            "id": "T1490",
+            "name": "Inhibit System Recovery",
+            "description": "Deletes shadow copies and other backups to prevent recovery"
+        },
+        {
+            "id": "T1489",
+            "name": "Service Stop",
+            "description": "Stops services that might lock files or interfere with encryption"
+        },
+        {
+            "id": "T1083",
+            "name": "File and Directory Discovery",
+            "description": "Enumerates files and directories for encryption"
+        },
+        {
+            "id": "T1082",
+            "name": "System Information Discovery",
+            "description": "Gathers system information for customization and reporting"
+        },
+        {
+            "id": "T1078",
+            "name": "Valid Accounts",
+            "description": "Uses legitimate credentials obtained during network intrusion"
+        },
+        {
+            "id": "T1021",
+            "name": "Remote Services",
+            "description": "Uses remote services for initial access and lateral movement"
+        },
+        {
+            "id": "T1485",
+            "name": "Data Destruction",
+            "description": "Can destroy data through secure deletion as part of triple extortion"
+        },
+        {
+            "id": "T1071",
+            "name": "Application Layer Protocol",
+            "description": "Uses HTTPS and Tor for command and control communication"
+        },
+        {
+            "id": "T1027",
+            "name": "Obfuscated Files or Information",
+            "description": "Uses obfuscation and encryption to hide configuration and functionality"
+        }
+    ],
+    "mitigations": [
+        {
+            "id": "M1053",
+            "name": "Data Backup",
+            "description": "Maintain offline, encrypted backups of data and test restoration regularly"
+        },
+        {
+            "id": "M1049",
+            "name": "Network Segmentation",
+            "description": "Segment networks to limit lateral movement capabilities"
+        },
+        {
+            "id": "M1028",
+            "name": "Multi-factor Authentication",
+            "description": "Implement MFA to prevent unauthorized access through stolen credentials"
+        },
+        {
+            "id": "M1042",
+            "name": "Disable or Remove Feature or Program",
+            "description": "Disable unnecessary services and features that could be exploited"
+        },
+        {
+            "id": "M1032",
+            "name": "Multi-factor Authentication",
+            "description": "Implement MFA especially for privileged accounts and remote access"
+        },
+        {
+            "id": "M1018",
+            "name": "User Account Management",
+            "description": "Implement principle of least privilege and regular access reviews"
+        },
+        {
+            "id": "M1051",
+            "name": "Update Software",
+            "description": "Maintain updated operating systems and applications to limit vulnerabilities"
+        },
+        {
+            "id": "M1047",
+            "name": "Audit",
+            "description": "Implement robust logging and monitoring to detect suspicious activity"
+        }
+    ]
+}

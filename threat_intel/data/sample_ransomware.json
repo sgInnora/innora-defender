@@ -1,0 +1,98 @@
+{
+  "sha256": "aaaaaaaaabbbbbbbbccccccccdddddddd",
+  "name": "sample_ransomware.exe",
+  "size": 1024000,
+  "analysis": {
+    "file_type": "PE32 executable",
+    "strings": [
+      "encrypt",
+      "bitcoin",
+      "payment",
+      ".encrypted",
+      "README.txt",
+      "Your files have been encrypted",
+      "To decrypt your files, you need to pay",
+      "bitcoin address:",
+      "1Nb7cV7UxFdNqRKU3gjYdezG5ipkAXXzS",
+      "AES-256",
+      "RSA-2048",
+      "C:\\Windows\\System32",
+      "CRYPTED",
+      "taskkill",
+      "process_encryption",
+      "file_encryption",
+      ".locky",
+      ".wncry",
+      ".restorebackup"
+    ],
+    "behaviors": {
+      "network": {
+        "domains": [
+          "badguy.com",
+          "payment.badguy.com",
+          "decryption-server.net",
+          "command-control.org"
+        ],
+        "ips": [
+          "192.168.1.1",
+          "8.8.8.8",
+          "45.77.65.211",
+          "95.213.184.75"
+        ],
+        "urls": [
+          "https://badguy.com/payment",
+          "https://command-control.org/keys",
+          "https://decryption-server.net/status"
+        ]
+      },
+      "file_operations": [
+        {
+          "type": "read",
+          "path": "C:\\Users\\victim\\Documents\\important.doc"
+        },
+        {
+          "type": "write",
+          "path": "C:\\Users\\victim\\Documents\\important.doc.encrypted" 
+        },
+        {
+          "type": "read",
+          "path": "C:\\Users\\victim\\Pictures\\vacation.jpg"
+        },
+        {
+          "type": "write",
+          "path": "C:\\Users\\victim\\Pictures\\vacation.jpg.encrypted"
+        },
+        {
+          "type": "read",
+          "path": "C:\\Users\\victim\\Downloads\\contract.pdf"
+        },
+        {
+          "type": "write",
+          "path": "C:\\Users\\victim\\Downloads\\contract.pdf.encrypted"
+        }
+      ],
+      "created_files": [
+        "C:\\Users\\victim\\Desktop\\README.txt",
+        "C:\\Users\\victim\\Desktop\\HOW_TO_DECRYPT.html",
+        "C:\\ProgramData\\encryption_keys.bin",
+        "C:\\Users\\victim\\Documents\\important.doc.encrypted",
+        "C:\\Users\\victim\\Pictures\\vacation.jpg.encrypted",
+        "C:\\Users\\victim\\Downloads\\contract.pdf.encrypted"
+      ],
+      "registry": {
+        "keys_set": [
+          "HKEY_CURRENT_USER\\Software\\Locky",
+          "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\EncryptionService",
+          "HKEY_CURRENT_USER\\Software\\Encryption\\Status"
+        ]
+      },
+      "processes": {
+        "created": [
+          "cmd.exe /c taskkill /f /im sqlservr.exe",
+          "cmd.exe /c taskkill /f /im MSExchange*",
+          "vssadmin.exe delete shadows /all /quiet"
+        ]
+      }
+    }
+  }
+}

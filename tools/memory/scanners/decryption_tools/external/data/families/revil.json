@@ -1,0 +1,140 @@
+{
+    "name": "REvil/Sodinokibi",
+    "aliases": ["Sodinokibi", "REvil", "Sodin"],
+    "first_seen": "2019-04",
+    "active": false,
+    "ransomware_as_service": true,
+    "group_attribution": "Gold Southfield",
+    "countries_targeted": ["global", "united_states", "europe", "asia"],
+    "sectors_targeted": ["healthcare", "finance", "government", "manufacturing", "retail"],
+    "description": "REvil (Sodinokibi) is a sophisticated ransomware operation that emerged as a successor to GandCrab. It operates as Ransomware-as-a-Service (RaaS), allowing affiliates to distribute the ransomware while developers take a percentage of ransom payments.",
+    "technical_details": {
+        "programming_language": "C",
+        "key_generation": {
+            "method": "Unique per victim",
+            "description": "REvil generates a unique key for each infected system and encrypts this key with an embedded RSA public key."
+        },
+        "encryption": {
+            "algorithm": "Salsa20",
+            "key_length": 2048,
+            "mode": "Stream cipher",
+            "implementation_details": "REvil uses Salsa20 for fast file encryption. Each file is encrypted with a unique key, which is then encrypted with the victim-specific RSA public key."
+        },
+        "extension": [".rvil", ".sodinokibi", ".random_characters"],
+        "ransom_note": {
+            "filenames": ["README.txt", "{random}-readme.txt"],
+            "content_markers": ["All of your files are encrypted with RSA-2048 and AES-256 ciphers", "Welcome to REvil"]
+        },
+        "file_markers": {
+            "header": "No consistent header marker",
+            "footer": "No consistent footer marker",
+            "other": "Files are encrypted with a unique structure that can be identified through entropy analysis"
+        },
+        "network_indicators": {
+            "c2_domains": ["Standard RaaS doesn't use consistent C2 domains"],
+            "tor_addresses": ["Various .onion addresses used for payment portals"]
+        },
+        "execution_behavior": {
+            "persistence": "Generally doesn't establish persistence as execution is completed in a single run",
+            "process_injection": "Can inject into legitimate processes",
+            "anti_analysis": [
+                "Checks for sandbox environments",
+                "Detects debugging attempts",
+                "Checks system language settings to avoid CIS countries",
+                "Checks for virtualization"
+            ],
+            "privilege_escalation": "Uses various Windows exploits for privilege escalation when needed"
+        }
+    },
+    "available_decryptors": {
+        "bitdefender_tool": {
+            "name": "Bitdefender REvil Decryptor",
+            "url": "https://www.bitdefender.com/blog/labs/bitdefender-releases-universal-revil-decryptor/",
+            "description": "In September 2021, Bitdefender released a universal decryption tool for REvil victims in collaboration with law enforcement.",
+            "limitations": "Works for infections prior to July 13, 2021, requires a sample of an encrypted file and its original version."
+        },
+        "truesec_tool": {
+            "name": "Truesec REvil Decryptor",
+            "url": "https://blog.truesec.com/2021/09/23/new-revil-ransomware-decryption-tool/",
+            "description": "Decryption tool for systems infected before July 13, 2021.",
+            "limitations": "Limited to specific timeframe victims."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "Kaseya VSA Supply Chain Attack",
+            "date": "2021-07",
+            "description": "REvil attacked managed service providers through a vulnerability in Kaseya VSA software, affecting up to 1,500 businesses in a massive supply chain attack."
+        },
+        {
+            "name": "JBS Foods Attack",
+            "date": "2021-05",
+            "description": "Attack on JBS Foods, one of the world's largest meat processors, leading to an $11 million ransom payment."
+        },
+        {
+            "name": "Acer Attack",
+            "date": "2021-03",
+            "description": "Demanded a $50 million ransom from computer manufacturer Acer, one of the largest ransomware demands at that time."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the ransomware executable during encryption",
+            "Temporary files in %TEMP% directory (deleted after encryption)",
+            "Registry keys containing configuration"
+        ],
+        "memory_signatures": [
+            "Salsa20 encryption routines",
+            "RSA encryption implementations",
+            "Unique victim ID strings"
+        ],
+        "extraction_techniques": "Memory dump during active encryption may capture encryption keys before they're removed from memory"
+    },
+    "recovery_strategies": [
+        "Use available decryptors if infection occurred before July 2021",
+        "Check for Volume Shadow Copies if not explicitly deleted by attackers",
+        "Offline backups are the most reliable recovery method",
+        "In some cases, files with certain extensions may be skipped during encryption"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule REvil_Ransomware {",
+            "    strings:",
+            "        $s1 = \"expand 32-byte k\" ascii wide",
+            "        $s2 = \"Salsa20\" ascii wide",
+            "        $s3 = \".onion\" ascii wide",
+            "        $s4 = \"README\" ascii wide",
+            "        $code1 = { 83 F8 FF 74 63 33 C9 4? 8D 54 24 ?? 41 }",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and filesize < 4000KB and",
+            "        (all of ($s*) or $code1)",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: REvil Ransomware Execution Indicators",
+            "description: Detects artifacts generated by REvil/Sodinokibi ransomware",
+            "references:",
+            "    - https://www.bitdefender.com/blog/labs/bitdefender-releases-universal-revil-decryptor/",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection:",
+            "        CommandLine|contains:",
+            "            - 'vssadmin delete shadows /all'",
+            "            - 'bcdedit /set {default} recoveryenabled no'",
+            "            - 'wbadmin delete catalog -quiet'",
+            "    condition: selection",
+            "falsepositives: rare legitimate admin activities",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.bitdefender.com/blog/labs/bitdefender-releases-universal-revil-decryptor/",
+        "https://www.cisa.gov/uscert/ncas/alerts/aa22-040a",
+        "https://blog.truesec.com/2021/09/23/new-revil-ransomware-decryption-tool/",
+        "https://www.mcafee.com/blogs/other-blogs/mcafee-labs/mcafee-atr-analyzes-sodinokibi-aka-revil-ransomware-as-a-service/",
+        "https://securelist.com/revil-ransomware/101531/"
+    ],
+    "last_updated": "2025-05-02"
+}

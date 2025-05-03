@@ -1,0 +1,168 @@
+{
+    "name": "BlackCat/ALPHV",
+    "aliases": ["BlackCat", "ALPHV", "Noberus"],
+    "first_seen": "2021-11",
+    "active": true,
+    "ransomware_as_service": true,
+    "group_attribution": "Believed to include former operators from BlackMatter/DarkSide/REvil",
+    "countries_targeted": ["global", "with a focus on US, Europe, and Australia"],
+    "sectors_targeted": ["manufacturing", "legal services", "transportation", "finance", "healthcare", "energy", "technology"],
+    "description": "BlackCat (also known as ALPHV) is a sophisticated ransomware-as-a-service operation notable for being written in Rust, which provides cross-platform functionality and enhanced security features. The group employs double and sometimes triple extortion tactics, stealing data before encryption and threatening exposure if ransoms aren't paid.",
+    "technical_details": {
+        "programming_language": "Rust",
+        "key_generation": {
+            "method": "Hybrid cryptosystem",
+            "description": "Uses a combination of RSA and symmetric encryption. Each file receives a unique encryption key."
+        },
+        "encryption": {
+            "algorithm": ["AES-256", "ChaCha20"],
+            "key_length": [256, 256],
+            "mode": ["CBC", "Stream cipher"],
+            "implementation_details": "BlackCat uses a configurable encryption scheme that can employ either AES-256-CBC or ChaCha20 depending on configuration. The operator can select encryption speed vs. strength, with options for full or fast encryption modes."
+        },
+        "extension": [".alphv", ".blackcat", ".micro", "random_extensions"],
+        "ransom_note": {
+            "filenames": ["RECOVER-${extension}-FILES.txt", "README.txt"],
+            "content_markers": ["YOUR NETWORKS IS ENCRYPTED", "If you are reading this, it means that your system was encrypted by the ALPHV ransomware"]
+        },
+        "file_markers": {
+            "header": "Varies by configuration, contains encrypted file header with metadata",
+            "footer": "Contains encrypted file key",
+            "other": "Encrypted files include metadata about encryption settings used"
+        },
+        "network_indicators": {
+            "c2_domains": ["Dynamic and unique per campaign"],
+            "tor_addresses": ["Multiple .onion addresses for payment portals and data leak sites"]
+        },
+        "execution_behavior": {
+            "persistence": "Generally doesn't establish persistence as encryption operation completes in a single run",
+            "process_injection": "Can inject into other processes to evade detection",
+            "anti_analysis": [
+                "Checks for virtual environments",
+                "Detects debugging attempts",
+                "Implements anti-VM techniques",
+                "Employs obfuscation",
+                "Uses Rust language features to complicate analysis",
+                "Can operate in safe mode"
+            ],
+            "privilege_escalation": "Uses various Windows exploits and stolen credentials for privilege escalation",
+            "lateral_movement": "Active directory enumeration, credential harvesting, SMB spreading through stolen credentials"
+        }
+    },
+    "available_decryptors": {
+        "avast_tool": {
+            "name": "Avast BlackCat Decryptor (ESXi only)",
+            "url": "https://decoded.avast.io/threatresearch/decrypted-blackcat-ransomware-via-memory-dump/",
+            "description": "Avast released a decryptor for BlackCat ransomware targeting ESXi systems.",
+            "limitations": "Only works for ESXi infections, requires obtaining memory dumps during encryption process."
+        },
+        "no_universal_decryptor": {
+            "name": "No Universal Decryptor Available",
+            "description": "As of 2025, there is no universal decryptor available for BlackCat/ALPHV ransomware. Recovery typically depends on backups or paying the ransom."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "TSMC Suppliers Attack",
+            "date": "2023-10",
+            "description": "Attack on several suppliers to Taiwan Semiconductor Manufacturing Company (TSMC), affecting the semiconductor supply chain."
+        },
+        {
+            "name": "Westpac Banking Corporation",
+            "date": "2023-07",
+            "description": "Attack on third-party vendor for Westpac, one of Australia's largest banks."
+        },
+        {
+            "name": "Western Digital Attack",
+            "date": "2023-03",
+            "description": "Major breach of Western Digital, forcing the company to shut down services and affecting My Cloud data."
+        },
+        {
+            "name": "Groupe LDLC",
+            "date": "2021-12",
+            "description": "Early attack on French IT retailer Groupe LDLC, with significant data theft."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the ransomware executable during active encryption",
+            "Temporary files created during encryption process",
+            "Memory regions containing key generation and handling routines"
+        ],
+        "memory_signatures": [
+            "Rust memory patterns associated with crypto operations",
+            "AES or ChaCha20 implementation patterns",
+            "RSA key handling routines",
+            "File enumeration patterns",
+            "Configuration structures in memory"
+        ],
+        "extraction_techniques": "Memory forensics techniques targeting Rust process memory can potentially extract keys. For ESXi systems, memory dumps during encryption have successfully been used to extract keys."
+    },
+    "recovery_strategies": [
+        "No universal decryptor is available; recovery depends primarily on backups",
+        "For ESXi systems, memory forensics during encryption might allow key extraction",
+        "Some variants may have implementation flaws that can be exploited for key recovery",
+        "In partial encryption modes, unencrypted file fragments might be recoverable"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule BlackCat_ALPHV_Ransomware {",
+            "    meta:",
+            "        description = \"Detects BlackCat/ALPHV ransomware\"",
+            "        author = \"Security Researcher\"",
+            "        reference = \"Internal Research\"",
+            "    strings:",
+            "        $rust1 = \"libcore.\" ascii wide",
+            "        $rust2 = \"rustc\" ascii wide",
+            "        $s1 = \"YOUR NETWORKS IS ENCRYPTED\" ascii wide nocase",
+            "        $s2 = \"ALPHV\" ascii wide",
+            "        $s3 = \".onion\" ascii wide",
+            "        $s4 = \"BlackCat\" ascii wide",
+            "        $s5 = \"cmd.exe /c wmic csproduct get uuid\" ascii wide",
+            "        $s6 = \"esxcli vm process list\" ascii wide",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and",
+            "        filesize < 15MB and",
+            "        (all of ($rust*) and 2 of ($s*))",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: BlackCat/ALPHV Ransomware Activity",
+            "id: 7b8adc7f-ea96-4a08-beec-1c6d3c8aa895",
+            "status: experimental",
+            "description: Detects BlackCat/ALPHV ransomware activity",
+            "references:",
+            "    - https://www.varonis.com/blog/blackcat-alphv-ransomware",
+            "    - https://decoded.avast.io/threatresearch/decrypted-blackcat-ransomware-via-memory-dump/",
+            "author: Security Researcher",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection_cmds:",
+            "        CommandLine|contains:",
+            "            - 'wmic shadowcopy delete'",
+            "            - 'vssadmin delete shadows /all'",
+            "            - 'bcdedit /set {default} bootstatuspolicy ignoreallfailures'",
+            "            - 'bcdedit /set {default} recoveryenabled no'",
+            "            - 'wbadmin delete catalog -quiet'",
+            "            - 'wmic.exe csproduct get uuid'",
+            "    selection_esxi:",
+            "        CommandLine|contains:",
+            "            - 'esxcli vm process list'",
+            "            - 'esxcli storage filesystem list'",
+            "    condition: selection_cmds or selection_esxi",
+            "falsepositives: Some legitimate administrative activities",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.mandiant.com/resources/blog/black-cat-analysis-rust",
+        "https://www.varonis.com/blog/blackcat-alphv-ransomware",
+        "https://decoded.avast.io/threatresearch/decrypted-blackcat-ransomware-via-memory-dump/",
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-040a",
+        "https://securityscorecard.com/research/deep-dive-into-blackcat-ransomware",
+        "https://blogs.blackberry.com/en/2022/01/threat-thursday-blackcat-ransomware"
+    ],
+    "last_updated": "2025-05-02"
+}

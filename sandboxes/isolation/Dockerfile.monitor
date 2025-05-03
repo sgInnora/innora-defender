@@ -1,0 +1,23 @@
+FROM ubuntu:20.04
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-dev \
+    strace ltrace sysdig procps \
+    binutils lsof iproute2 \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# 安装监控工具
+RUN pip3 install psutil memory_profiler
+
+# 创建工作目录
+WORKDIR /monitor
+
+# 复制监控脚本
+COPY monitor_scripts/ /monitor/
+
+# 创建日志目录
+RUN mkdir -p /logs
+
+ENTRYPOINT ["/bin/bash"]
+EOF < /dev/null

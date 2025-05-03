@@ -1,0 +1,161 @@
+{
+    "name": "LockBit",
+    "aliases": ["LockBit 2.0", "LockBit 3.0", "LockBit Black", "ABCD"],
+    "first_seen": "2019-09",
+    "active": true,
+    "ransomware_as_service": true,
+    "group_attribution": "LockBit gang, affiliates vary",
+    "countries_targeted": ["global", "with focus on corporate targets in North America and Europe"],
+    "sectors_targeted": ["manufacturing", "professional services", "construction", "transportation", "healthcare", "technology"],
+    "description": "LockBit is a sophisticated ransomware operation that has evolved through several versions. It operates on a Ransomware-as-a-Service model and is known for its efficient, self-spreading capabilities and technical sophistication. LockBit 3.0 (also known as LockBit Black) represents their latest evolution with enhanced encryption and anti-analysis capabilities.",
+    "technical_details": {
+        "programming_language": "C/C++",
+        "key_generation": {
+            "method": "Asymmetric encryption scheme",
+            "description": "Uses a hybrid RSA+AES encryption scheme. A unique AES key is generated for each file, which is then encrypted with the victim-specific RSA public key."
+        },
+        "encryption": {
+            "algorithm": "AES-256",
+            "key_length": 256,
+            "mode": "CBC",
+            "implementation_details": "Each file is encrypted with AES-256-CBC with a unique key. The key is then encrypted with a 4096-bit RSA public key."
+        },
+        "extension": [".lockbit", ".abcd", ".lock", ".LockBit", ".encrypted"],
+        "ransom_note": {
+            "filenames": ["Restore-My-Files.txt", "README.txt", "instructions.html"],
+            "content_markers": ["All your important files are encrypted!", "Your data are stolen and encrypted", "Visit our website in Tor Browser"]
+        },
+        "file_markers": {
+            "header": "LockBit may add a custom header to encrypted files, but this varies by version",
+            "footer": "The encrypted file key is often appended to the end of the file",
+            "other": "LockBit 3.0 uses a more sophisticated file structure with additional markers"
+        },
+        "network_indicators": {
+            "c2_domains": ["Dynamic and unique per campaign"],
+            "tor_addresses": ["Various .onion addresses for payment portals"]
+        },
+        "execution_behavior": {
+            "persistence": "Typically doesn't establish persistence as execution completes in one run",
+            "process_injection": "Can inject into legitimate processes to evade detection",
+            "anti_analysis": [
+                "Checks for virtual environments and sandboxes",
+                "Detects debugging tools",
+                "Employs anti-VM techniques",
+                "Can detect security analysis tools",
+                "Targets and terminates security software processes"
+            ],
+            "privilege_escalation": "Uses various techniques to gain SYSTEM privileges",
+            "lateral_movement": "Contains worm-like capabilities to spread across networks using SMB vulnerabilities, stolen credentials, and other techniques"
+        }
+    },
+    "available_decryptors": {
+        "bitdefender_tool": {
+            "name": "Bitdefender LockBit Decryptor",
+            "url": "https://www.bitdefender.com/blog/labs/bitdefender-releases-free-universal-decryptor-for-lockbit-ransomware/",
+            "description": "In May 2023, Bitdefender released a universal decryption tool for LockBit ransomware victims in collaboration with law enforcement.",
+            "limitations": "Works for specific versions and implementations affected by vulnerabilities discovered by researchers."
+        },
+        "nca_tool": {
+            "name": "NCA LockBit Decryption Tool",
+            "url": "https://www.ncsc.gov.uk/information/lockbit-decryption-capabilities",
+            "description": "Tool released by the UK National Crime Agency and partners following law enforcement operation against LockBit in February 2024.",
+            "limitations": "Works with specific versions based on keys seized during law enforcement operations."
+        }
+    },
+    "notable_attacks": [
+        {
+            "name": "Royal Mail Attack",
+            "date": "2023-01",
+            "description": "Attack on the UK's Royal Mail disrupted international shipping services for weeks."
+        },
+        {
+            "name": "EncoreLabs Attack",
+            "date": "2023-03",
+            "description": "Attack on Boeing parts supplier EncoreLabs, with threats to release sensitive data."
+        },
+        {
+            "name": "ION Group Attack",
+            "date": "2023-01",
+            "description": "Attack on financial data firm ION Group disrupted derivatives trading."
+        },
+        {
+            "name": "Taiwan Industrial Targets",
+            "date": "2022",
+            "description": "Series of attacks targeting Taiwan's industrial sector."
+        }
+    ],
+    "memory_forensics": {
+        "key_locations": [
+            "Process memory of the ransomware executable during encryption",
+            "Registry keys containing configuration data",
+            "Memory regions containing encryption keys before wiping"
+        ],
+        "memory_signatures": [
+            "AES encryption implementations",
+            "RSA key handling routines",
+            "File enumeration patterns",
+            "Unique strings and markers related to LockBit operations"
+        ],
+        "extraction_techniques": "Memory forensics during active encryption is the most reliable method for potential key recovery. Specific memory patterns can be targeted for recovery attempts."
+    },
+    "recovery_strategies": [
+        "Use official decryptors if available for your specific variant",
+        "Check for Volume Shadow Copies (although LockBit typically deletes these)",
+        "Reliable offline backups isolated from the main network",
+        "In some cases, files with specific extensions might be skipped (executables, system files)"
+    ],
+    "detection_signatures": {
+        "yara_rules": [
+            "rule LockBit_Ransomware {",
+            "    meta:",
+            "        description = \"Detects LockBit ransomware variants\"",
+            "        author = \"Security Researcher\"",
+            "        reference = \"Internal Research\"",
+            "    strings:",
+            "        $s1 = \"Restore-My-Files.txt\" ascii wide",
+            "        $s2 = \".onion\" ascii wide",
+            "        $s3 = \"LockBit\" ascii wide",
+            "        $s4 = \"encrypted\" ascii wide",
+            "        $code1 = { 48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B D9 48 8B FA 8B 0D }",
+            "        $code2 = { 40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B C3 }",
+            "    condition:",
+            "        uint16(0) == 0x5A4D and",
+            "        filesize < 2MB and",
+            "        (3 of ($s*) or any of ($code*))",
+            "}"
+        ],
+        "sigma_rules": [
+            "title: LockBit Ransomware Activity",
+            "id: 6e6c9bd1-4135-4c3d-a660-8fa04f78d7b5",
+            "status: experimental",
+            "description: Detects LockBit ransomware activity based on process creation events",
+            "references:",
+            "    - https://www.trendmicro.com/en_us/research/22/d/an-overview-of-the-lockbit-3-0-ransomware.html",
+            "author: Security Researcher",
+            "logsource:",
+            "    category: process_creation",
+            "    product: windows",
+            "detection:",
+            "    selection:",
+            "        CommandLine|contains:",
+            "            - 'vssadmin delete shadows /all'",
+            "            - 'wmic shadowcopy delete'",
+            "            - 'bcdedit /set {default} recoveryenabled no'",
+            "            - 'bcdedit /set {default} bootstatuspolicy ignoreallfailures'",
+            "            - 'Restore-My-Files.txt'",
+            "            - '.lockbit'",
+            "    condition: selection",
+            "falsepositives: Some legitimate administrative activities",
+            "level: high"
+        ]
+    },
+    "references": [
+        "https://www.trendmicro.com/en_us/research/22/d/an-overview-of-the-lockbit-3-0-ransomware.html",
+        "https://www.bitdefender.com/blog/labs/bitdefender-releases-free-universal-decryptor-for-lockbit-ransomware/",
+        "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-075a",
+        "https://www.malwarebytes.com/blog/news/2022/07/lockbit-3-0-aka-lockbit-black-ransomware-analysis",
+        "https://blogs.blackberry.com/en/2022/07/threat-thursday-lockbit-3-0-black",
+        "https://www.ncsc.gov.uk/information/lockbit-decryption-capabilities"
+    ],
+    "last_updated": "2025-05-02"
+}

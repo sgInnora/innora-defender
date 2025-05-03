@@ -1,0 +1,67 @@
+{
+  "name": "STOP/Djvu",
+  "aliases": ["STOP", "Djvu", "DJVU"],
+  "first_seen": "2018-12-01",
+  "description": "STOP/Djvu is one of the most widespread ransomware families, targeting primarily home users through cracked software, key generators, and fake software updates.",
+  "encryption": {
+    "algorithms": ["Salsa20", "RSA-1024"],
+    "implementation": "STOP/Djvu encryption has two variants: online and offline keys. In online mode, it connects to C2 servers to get a unique key. In offline mode, it uses a hardcoded key that is the same for all victims infected in offline mode during the same time period.",
+    "file_marker": "",
+    "extensions": [".djvu", ".djvus", ".djvuu", ".udjvu", ".uudjvu", ".djvuq", ".djvur", ".djvut", ".pdff", ".tro", ".tfude", ".tfudeq", ".tfuder", ".rumba", ".adobe", ".adobee", ".blower", ".promos"],
+    "weaknesses": "Offline encryption variant uses a hardcoded key shared among all victims in the same time period, making decryption possible if the key is obtained from any victim"
+  },
+  "ransom_notes": [
+    "_readme.txt"
+  ],
+  "decryption_tools": [
+    {
+      "name": "Emsisoft STOP Djvu Decryptor",
+      "url": "https://www.emsisoft.com/ransomware-decryption-tools/stop-djvu",
+      "description": "Specialized decryption tool that can decrypt files encrypted by offline variants of STOP/Djvu",
+      "effectiveness": "High for offline variants, ineffective for online variants",
+      "instructions": "Run the decryptor and follow the on-screen instructions. You need a pair of encrypted/original files to attempt key discovery."
+    },
+    {
+      "name": "Michael Gillespie's STOPDecrypter",
+      "url": "https://github.com/whalecold/STOPDecrypter",
+      "description": "Free tool to decrypt files encrypted by the offline key variant of STOP",
+      "effectiveness": "Medium - works for older offline variants"
+    }
+  ],
+  "detection": {
+    "yara_rules": [
+      "rule STOP_Djvu {",
+      "    strings:",
+      "        $ransom_note = \"_readme.txt\"",
+      "        $marker1 = \"Attention!\"",
+      "        $marker2 = \"All your files has been encrypted\"",
+      "        $marker3 = \"How to get the key to decrypt my files\"",
+      "    condition:",
+      "        any of them",
+      "}"
+    ],
+    "file_markers": [],
+    "registry_artifacts": []
+  },
+  "key_recovery": {
+    "methods": [
+      "Analysis of encrypted files to determine if online or offline key was used",
+      "For offline variants, check Emsisoft's database of recovered keys",
+      "For online variants, memory analysis might recover the key if performed quickly after infection"
+    ],
+    "success_rate": "High for offline variants, very low for online variants"
+  },
+  "technical_details": {
+    "propagation": "Primarily through fake software cracks, key generators, activators, and pirated software",
+    "bitcoin_addresses": [
+      "Multiple addresses used, regularly changed for different victims"
+    ],
+    "infection_mechanism": "Often bundled with the STOP Trojan which first disables security software"
+  },
+  "references": [
+    "https://www.bleepingcomputer.com/news/security/emsisoft-releases-new-decryptor-for-stop-djvu-ransomware/",
+    "https://www.emsisoft.com/en/blog/37517/stop-djvu-ransomware-reference-guide/",
+    "https://www.malwarebytes.com/blog/news/2020/02/stop-djvu-ransom-often-not-worth-paying",
+    "https://id-ransomware.blogspot.com/2019/02/stop-ransomware.html"
+  ]
+}

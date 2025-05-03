@@ -1,0 +1,309 @@
+{
+    "version": "1.0",
+    "last_updated": "2025-05-02",
+    "description": "Database of network-based indicators and traffic patterns for major ransomware families",
+    "families": {
+        "WannaCry": {
+            "c2_domains": [
+                "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+                "xxlvbrloxvriy2c5.onion"
+            ],
+            "c2_ips": [
+                "144.217.254.3",
+                "149.154.175.192"
+            ],
+            "port_patterns": [
+                {"port": 445, "protocol": "tcp", "purpose": "SMB exploitation via EternalBlue"},
+                {"port": 139, "protocol": "tcp", "purpose": "NetBIOS session service for lateral movement"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "SMB traffic to port 445 with characteristic EternalBlue exploit patterns", "confidence": "high"},
+                {"pattern": "DNS queries for kill-switch domain", "confidence": "high"}
+            ],
+            "exfiltration_indicators": "WannaCry does not typically exfiltrate data",
+            "kill_switch_domains": [
+                "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
+            ],
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 445 (msg:\"WANNACRY SMB exploit\"; content:\"|00 00 00 72 00 00 00 08 00 00 00 00|\"; offset:0; depth:12; classtype:trojan-activity; sid:1000001; rev:1;)",
+                    "alert tcp any any -> any 445 (msg:\"WANNACRY SMB DoublePulsar backdoor\"; content:\"|00 00 00 72 00 00 00 08 00 00 00 00|\"; offset:0; depth:12; content:\"|77 00 00 00|\"; within:8; distance:4; classtype:trojan-activity; sid:1000002; rev:1;)"
+                ],
+                "suricata": [
+                    "alert tcp any any -> any 445 (msg:\"ET EXPLOIT WannaCry/WannaCrypt Ransomware MS17-010 SMB Exploit\"; flow:established,to_server; content:\"|00 00 00 72 00 00 00 08|\"; depth:8; content:\"|40 00 00 18 0c 00 00 00|\"; distance:4; within:8; reference:url,github.com/rapidsec/wannasmile; classtype:trojan-activity; sid:2024217; rev:1;)",
+                    "alert dns any any -> any any (msg:\"WannaCry Ransomware Kill Switch Domain Detection\"; dns.query; content:\"iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea\"; nocase; classtype:trojan-activity; sid:2024218; rev:1;)"
+                ],
+                "zeek": [
+                    "signature::create_signature(addr_matches($src) && addr_matches($dst) && ip_matches($src) && ip_matches($dst) && is_service_port($dst, 'SMB') && /\\x00\\x00\\x00\\x72\\x00\\x00\\x00\\x08/ in payload && /\\x40\\x00\\x00\\x18\\x0c\\x00\\x00\\x00/ in payload)"
+                ]
+            }
+        },
+        "REvil": {
+            "c2_domains": [
+                "Dynamic domains, no fixed pattern",
+                "Various .onion domains for payment portals"
+            ],
+            "c2_ips": "No consistent C2 infrastructure; uses dynamic infrastructure",
+            "port_patterns": [
+                {"port": 443, "protocol": "tcp", "purpose": "HTTPS communication with C2"},
+                {"port": 0, "protocol": "udp", "purpose": "Potential DNS tunneling"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "HTTPS POST requests with binary data to random subdomains", "confidence": "medium"},
+                {"pattern": "TOR traffic for data exfiltration and ransom payment", "confidence": "high"},
+                {"pattern": "DNS tunneling for C2 communication", "confidence": "medium"}
+            ],
+            "exfiltration_indicators": {
+                "data_staging": "Creates temporary archives before exfiltration",
+                "protocols": ["HTTPS", "Tor"],
+                "network_behavior": "Large outbound encrypted transfers, often to cloud storage services"
+            },
+            "botnet_patterns": {
+                "protocol": "Custom encrypted protocol over HTTPS",
+                "behavior": "Beacon-like communication with jitter"
+            },
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 443 (msg:\"Possible REvil/Sodinokibi C2 Communication\"; content:\"|17 03 03|\"; offset:0; depth:3; content:\"|00 00 00 00 00 00 00 00|\"; within:80; pcre:\"/\\x00{8}.*\\x00{8}/\"; classtype:trojan-activity; sid:1000003; rev:1;)"
+                ],
+                "suricata": [
+                    "alert tls any any -> any any (msg:\"Possible REvil C2 Communication Pattern\"; flow:established; tls.sni; content:!\".\"; content:\".com\"; endswith; pcre:\"/^[a-z0-9]{12,20}\\.com$/i\"; classtype:trojan-activity; sid:2024219; rev:1;)"
+                ],
+                "zeek": [
+                    "event connection_established(c: connection) { if (c$ssl && /^[a-z0-9]{12,20}\\.com$/ in c$ssl$server_name) { NOTICE([\"$conn\"] = c, [\"$note\"] = Conn::Possible_REvil_C2, [\"$msg\"] = fmt(\"Possible REvil C2: %s\", c$ssl$server_name)); } }"
+                ]
+            }
+        },
+        "LockBit": {
+            "c2_domains": [
+                "Dynamic C2 domains, unique per campaign",
+                "Multiple .onion leak sites and payment portals"
+            ],
+            "c2_ips": "No consistent infrastructure; highly dynamic",
+            "port_patterns": [
+                {"port": 443, "protocol": "tcp", "purpose": "HTTPS communication with C2"},
+                {"port": 445, "protocol": "tcp", "purpose": "SMB for lateral movement"},
+                {"port": 135, "protocol": "tcp", "purpose": "RPC for discovery and lateral movement"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "HTTPS traffic with distinctive cipher preferences", "confidence": "medium"},
+                {"pattern": "SMB traffic with specific command sequences for lateral movement", "confidence": "high"},
+                {"pattern": "Unusual volume of internal scanning and connections to domain controllers", "confidence": "high"},
+                {"pattern": "Abnormal RPC and LDAP queries for domain enumeration", "confidence": "high"}
+            ],
+            "exfiltration_indicators": {
+                "data_staging": "Often creates archives with .7z extension",
+                "protocols": ["HTTPS", "Tor", "WebDAV"],
+                "network_behavior": "Data compression followed by encrypted transfers to multiple endpoints"
+            },
+            "lateral_movement": {
+                "methods": ["SMB", "WMI", "RPC", "PsExec"],
+                "network_indicators": "Unusual authentication attempts across multiple hosts",
+                "credential_harvesting": "Mimikatz-like memory patterns and LSASS access"
+            },
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 445 (msg:\"Possible LockBit Lateral Movement\"; content:\"|01 00 00 00|\"; offset:0; depth:4; pcre:\"/\\x01\\x00\\x00\\x00.{20,30}\\xff\\xff\\xff\\xff/\"; classtype:trojan-activity; sid:1000004; rev:1;)",
+                    "alert tcp any any -> any 135 (msg:\"Possible LockBit RPC Activity\"; content:\"|05 00 0b|\"; depth:3; classtype:trojan-activity; sid:1000005; rev:1;)"
+                ],
+                "suricata": [
+                    "alert smb any any -> any any (msg:\"Potential LockBit Lateral Movement\"; flow:established; content:\"|FF|SMB\"; offset:4; depth:4; pcre:\"/\\x01\\x00\\x00\\x00.{20,30}\\xff\\xff\\xff\\xff/\"; classtype:trojan-activity; sid:2024220; rev:1;)",
+                    "alert tcp any any -> any any (msg:\"Potential LockBit Data Exfiltration\"; flow:established,to_server; content:\"POST\"; http.method; content:\"multipart/form-data\"; http.header; content:\".7z\"; http.header; classtype:trojan-activity; sid:2024221; rev:1;)"
+                ],
+                "zeek": [
+                    "event smb1_message(c: connection, hdr: SMB1::Header, is_orig: bool) { if (hdr$command == 0x25 && /\\x01\\x00\\x00\\x00.{20,30}\\xff\\xff\\xff\\xff/ in c$service) { NOTICE([\"$conn\"] = c, [\"$note\"] = Conn::Possible_LockBit_Movement, [\"$msg\"] = \"Possible LockBit lateral movement detected\"); } }"
+                ]
+            }
+        },
+        "BlackCat": {
+            "c2_domains": [
+                "Dynamic and unique per campaign",
+                "Multiple .onion domains for data leak sites"
+            ],
+            "c2_ips": "No consistent pattern; highly varied infrastructure",
+            "port_patterns": [
+                {"port": 443, "protocol": "tcp", "purpose": "HTTPS communication with C2"},
+                {"port": 22, "protocol": "tcp", "purpose": "SSH/SCP for data exfiltration"},
+                {"port": 21, "protocol": "tcp", "purpose": "FTP for data exfiltration"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "HTTPS traffic with specific TLS fingerprints and JA3 hashes", "confidence": "high"},
+                {"pattern": "Uncommon TLS cipher preferences characteristic of Rust TLS libraries", "confidence": "medium"},
+                {"pattern": "Triple-staged data exfiltration pattern: enumeration, staging, exfiltration", "confidence": "high"}
+            ],
+            "exfiltration_indicators": {
+                "data_staging": "Systematic file staging with temporary encryption for transit",
+                "protocols": ["HTTPS", "SFTP", "SCP", "Tor"],
+                "network_behavior": "Sequential transfer of multiple archive files"
+            },
+            "esxi_specific_patterns": {
+                "port_access": "Direct access to ESXi management ports (443/TCP, 902/TCP)",
+                "commands": "ESXi commands for VM shutdown and snapshot deletion",
+                "file_access": "Access patterns to key ESXi directories and VMDK files"
+            },
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 443 (msg:\"Potential BlackCat ALPHV C2 Traffic\"; flow:established,to_server; content:\"|16 03|\"; depth:2; content:\"|01 00|\"; distance:1; within:2; byte_test:2,>,0x00FF,0,relative; content:\"|03 03|\"; distance:1; within:2; pcre:\"/\\x00\\x1E\\x00\\x00\\x00\\x00\\x00\\x00/\"; classtype:trojan-activity; sid:1000006; rev:1;)"
+                ],
+                "suricata": [
+                    "alert tls any any -> any any (msg:\"Potential BlackCat TLS Fingerprint\"; flow:established; ja3.hash; content:\"51c64c77e60f3980eea90869b68c58a8\"; classtype:trojan-activity; sid:2024222; rev:1;)",
+                    "alert http any any -> any any (msg:\"BlackCat Exfiltration Pattern\"; flow:established,to_server; http.method; content:\"POST\"; http.header; content:\"multipart/form-data\"; content:\".tar\"; distance:0; classtype:trojan-activity; sid:2024223; rev:1;)"
+                ],
+                "zeek": [
+                    "hook ssl_client_hello(c: connection, version: count, record_version: count, possible_ts: time, client_random: string, session_id: string, ciphers: index_vec, comp_methods: index_vec) &priority=10 { if (md5(ja3_string(c$id, version, record_version, client_random, session_id, ciphers, comp_methods)) == \"51c64c77e60f3980eea90869b68c58a8\") { NOTICE([\"$conn\"] = c, [\"$note\"] = SSL::Potential_BlackCat_Client, [\"$msg\"] = \"Potential BlackCat client TLS fingerprint\"); } }"
+                ]
+            }
+        },
+        "Conti": {
+            "c2_domains": [
+                "Dynamically generated domains",
+                "TrickBot-related infrastructure",
+                "Multiple .onion domains for leak sites"
+            ],
+            "c2_ips": "Varied, often shared with TrickBot infrastructure",
+            "port_patterns": [
+                {"port": 443, "protocol": "tcp", "purpose": "HTTPS communication with C2"},
+                {"port": 445, "protocol": "tcp", "purpose": "SMB for lateral movement"},
+                {"port": 4343, "protocol": "tcp", "purpose": "Alternative C2 channel"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "HTTPS traffic with specific URI patterns and User-Agent strings", "confidence": "high"},
+                {"pattern": "HTTP POST requests with encrypted data in specific format", "confidence": "high"},
+                {"pattern": "BazarLoader-style C2 communication with specific timing patterns", "confidence": "medium"}
+            ],
+            "exfiltration_indicators": {
+                "data_staging": "Creates .zip or .rar archives with specific naming patterns",
+                "protocols": ["HTTPS", "FTP", "Tor"],
+                "network_behavior": "Large, encrypted file transfers often preceded by domain enumeration"
+            },
+            "botnet_patterns": {
+                "trojan_loaders": ["BazarLoader", "TrickBot", "IcedID"],
+                "command_format": "Encrypted JSON-like structure",
+                "beacon_timing": "Irregular intervals with specific sleep patterns"
+            },
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 443 (msg:\"Potential Conti C2 Communication\"; flow:established,to_server; content:\"POST\"; nocase; http_method; content:\"/wp-content/plugins/\"; http_uri; content:\"User-Agent: Mozilla/\"; http_header; pcre:\"/User-Agent:\\s*Mozilla\\/[4-5]\\.0\\s*\\(Windows NT [6-9]\\.[0-9]; Win[6-9][4-9]; \\S+\\)/\"; classtype:trojan-activity; sid:1000007; rev:1;)"
+                ],
+                "suricata": [
+                    "alert http any any -> any any (msg:\"Potential Conti C2 HTTP Pattern\"; flow:established,to_server; http.method; content:\"POST\"; http.uri; content:\"/wp-content/plugins/\"; http.user_agent; pcre:\"/Mozilla\\/[4-5]\\.0\\s*\\(Windows NT [6-9]\\.[0-9]; Win[6-9][4-9]; \\S+\\)/\"; classtype:trojan-activity; sid:2024224; rev:1;)"
+                ],
+                "zeek": [
+                    "event http_request(c: connection, method: string, original_URI: string, unescaped_URI: string, version: string) { if (method == \"POST\" && /\\/wp-content\\/plugins\\// in original_URI && /Mozilla\\/[4-5]\\.0\\s*\\(Windows NT [6-9]\\.[0-9]; Win[6-9][4-9]; \\S+\\)/ in c$http$user_agent) { NOTICE([\"$conn\"] = c, [\"$note\"] = HTTP::Potential_Conti_C2, [\"$msg\"] = fmt(\"Potential Conti C2: %s %s\", original_URI, c$http$user_agent)); } }"
+                ]
+            }
+        },
+        "Hive": {
+            "c2_domains": [
+                "Varied infrastructure with no consistent pattern",
+                "Multiple .onion domains for victim portals"
+            ],
+            "c2_ips": "Highly varied and frequently changing",
+            "port_patterns": [
+                {"port": 443, "protocol": "tcp", "purpose": "HTTPS communication with C2"},
+                {"port": 8080, "protocol": "tcp", "purpose": "Alternative HTTP communication"},
+                {"port": 8443, "protocol": "tcp", "purpose": "Alternative HTTPS port"}
+            ],
+            "traffic_patterns": [
+                {"pattern": "HTTPS traffic with unusual certificate characteristics", "confidence": "medium"},
+                {"pattern": "HTTP POST requests with binary data in specific chunked format", "confidence": "high"},
+                {"pattern": "Beacon-like communication with specific timing intervals", "confidence": "medium"}
+            ],
+            "exfiltration_indicators": {
+                "data_staging": "Systematic file gathering and compression",
+                "protocols": ["HTTPS", "WebDAV", "Tor"],
+                "network_behavior": "Multiple stages of data transfer with specific encryption patterns"
+            },
+            "esxi_specific_patterns": {
+                "port_access": "Direct access to ESXi management interfaces",
+                "commands": "Specific sequences of ESXi CLI commands",
+                "file_access": "Direct access to key ESXi directories"
+            },
+            "detection_signatures": {
+                "snort": [
+                    "alert tcp any any -> any 443 (msg:\"Potential Hive Ransomware C2\"; flow:established,to_server; content:\"POST\"; http_method; content:\"/home/\"; http_uri; content:\"Content-Type: application/octet-stream\"; http_header; pcre:\"/Content-Length:\\s*[1-9][0-9]{4,}/\"; classtype:trojan-activity; sid:1000008; rev:1;)"
+                ],
+                "suricata": [
+                    "alert http any any -> any any (msg:\"Potential Hive Ransomware Data Exfiltration\"; flow:established,to_server; http.method; content:\"POST\"; http.uri; content:\"/home/\"; http.header; content:\"Content-Type: application/octet-stream\"; content:\"Content-Length:\"; http.header; classtype:trojan-activity; sid:2024225; rev:1;)"
+                ],
+                "zeek": [
+                    "event http_request(c: connection, method: string, original_URI: string, unescaped_URI: string, version: string) { if (method == \"POST\" && /\\/home\\// in original_URI && c$http$content_type == \"application/octet-stream\" && to_count(c$http$content_length) > 10000) { NOTICE([\"$conn\"] = c, [\"$note\"] = HTTP::Potential_Hive_Exfil, [\"$msg\"] = fmt(\"Potential Hive exfiltration: %s, length: %s\", original_URI, c$http$content_length)); } }"
+                ]
+            }
+        }
+    },
+    "decryption_network_indicators": {
+        "key_exchange_patterns": {
+            "description": "Network patterns that might indicate encryption key exchange",
+            "indicators": [
+                {
+                    "pattern": "Small encrypted packets (<1KB) sent immediately before beginning encryption",
+                    "detection": "Monitor for small encrypted packets followed by high disk I/O and file modifications",
+                    "significance": "May contain encryption keys or parameters"
+                },
+                {
+                    "pattern": "DNS queries with unusually long subdomains or high entropy",
+                    "detection": "DNS traffic analysis with entropy scoring",
+                    "significance": "Potential key material or configuration data encoded in DNS"
+                },
+                {
+                    "pattern": "HTTPS POST requests immediately before encryption begins",
+                    "detection": "Correlation of HTTPS POST timing with file system encryption activity",
+                    "significance": "Command and control providing encryption instructions"
+                }
+            ]
+        },
+        "key_retrieval_opportunities": {
+            "description": "Points in the network communication where encryption keys might be recoverable",
+            "methods": [
+                {
+                    "name": "SSL/TLS Interception",
+                    "description": "Using MitM proxies or TLS inspection to capture key exchange",
+                    "effectiveness": "Medium - Requires specific network configuration",
+                    "applicability": "Early stages of infection before full encryption begins"
+                },
+                {
+                    "name": "C2 Server Impersonation",
+                    "description": "DNS redirection to capture initial key exchange with C2 server",
+                    "effectiveness": "High - If implemented before full infection",
+                    "applicability": "Initial infection stages for ransomware that retrieves keys remotely"
+                },
+                {
+                    "name": "DNS Tunneling Inspection",
+                    "description": "Analyzing and capturing encoded data in DNS queries/responses",
+                    "effectiveness": "Medium - Requires specialized DNS monitoring",
+                    "applicability": "Ransomware using DNS for C2 or key exchange"
+                }
+            ]
+        }
+    },
+    "network_forensics_techniques": {
+        "packet_capture_guidance": {
+            "key_flows": "Focus on flows to known C2 domains/IPs and suspicious encrypted traffic",
+            "timing": "Most valuable during initial infection and before encryption completes",
+            "tools": ["Wireshark", "tcpdump", "NetworkMiner", "Zeek", "Moloch"]
+        },
+        "memory_correlation": {
+            "description": "Correlating network artifacts with memory forensics",
+            "methods": [
+                "Extract network indicators from memory and correlate with packet captures",
+                "Identify encryption keys and parameters in memory associated with network connections",
+                "Track network handles and sockets in process memory for potential key material"
+            ]
+        },
+        "key_extraction_from_traffic": {
+            "methods": [
+                {
+                    "name": "TLS Key Extraction",
+                    "description": "Extract TLS session keys from memory and use to decrypt captured traffic",
+                    "tools": ["Wireshark with SSLKEYLOGFILE", "Memory forensics for key extraction"]
+                },
+                {
+                    "name": "Custom Protocol Analysis",
+                    "description": "Reverse engineering custom C2 protocols to identify key exchange patterns",
+                    "tools": ["Wireshark with custom dissectors", "NetworkMiner", "Python for custom analysis"]
+                }
+            ]
+        }
+    }
+}

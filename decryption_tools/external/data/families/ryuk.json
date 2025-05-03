@@ -1,0 +1,78 @@
+{
+  "name": "Ryuk",
+  "aliases": ["RYK"],
+  "first_seen": "2018-08-01",
+  "description": "Ryuk is a sophisticated ransomware operation targeting large organizations and enterprises with high-value targets. It's known for its targeted approach and high ransom demands, often in the millions of dollars.",
+  "encryption": {
+    "algorithms": ["RSA-4096", "AES-256"],
+    "implementation": "Ryuk uses a hybrid encryption approach. Files are encrypted with AES-256 using unique keys per file, and the AES keys are then encrypted with a RSA-4096 public key. The ransomware attempts to terminate processes and services that might lock files, and specifically targets databases, backups, and system files.",
+    "file_marker": "HERMES",
+    "extensions": [".ryk", ".ryuk", ".RYK"],
+    "weaknesses": "No significant cryptographic weaknesses have been identified. Some variants may leave shadow copies intact if shadow copy deletion fails."
+  },
+  "ransom_notes": [
+    "RyukReadMe.txt"
+  ],
+  "decryption_tools": [
+    {
+      "name": "No public decryptors available",
+      "url": "",
+      "description": "Due to the proper implementation of encryption, there are no publicly available free decryption tools for Ryuk ransomware",
+      "effectiveness": "N/A",
+      "instructions": "File recovery depends on having clean backups; no decryption solution exists without the attacker's decryption key"
+    }
+  ],
+  "detection": {
+    "yara_rules": [
+      "rule Ryuk {",
+      "    strings:",
+      "        $marker = \"HERMES\"",
+      "        $note = \"RyukReadMe.txt\"",
+      "        $process1 = \"vssadmin Delete Shadows /all /quiet\"",
+      "        $process2 = \"bcdedit /set {default} recoveryenabled No\"",
+      "    condition:",
+      "        any of them",
+      "}"
+    ],
+    "file_markers": ["HERMES"],
+    "registry_artifacts": []
+  },
+  "key_recovery": {
+    "methods": [
+      "No reliable methods to recover keys without paying the ransom",
+      "Memory forensics immediately after infection might recover keys in rare cases"
+    ],
+    "success_rate": "Very low"
+  },
+  "technical_details": {
+    "propagation": "Often delivered as a second-stage payload after initial compromise through Emotet or TrickBot infections",
+    "bitcoin_addresses": [
+      "Multiple addresses used, customized per victim"
+    ],
+    "targets": "Large enterprises, healthcare organizations, government entities, and educational institutions",
+    "attribution": "Believed to be operated by the WIZARD SPIDER threat group, with possible ties to Russian cybercriminals"
+  },
+  "mitigation": {
+    "prevention": [
+      "Maintain offline backups",
+      "Deploy endpoint protection with anti-ransomware capabilities",
+      "Implement network segmentation",
+      "Restrict administrative privileges",
+      "Patch systems regularly",
+      "Use multi-factor authentication",
+      "Implement email filtering to block common attachment types"
+    ],
+    "post_infection": [
+      "Isolate affected systems",
+      "Restore from clean backups if available",
+      "Report to law enforcement",
+      "Consider paying ransom only as a last resort"
+    ]
+  },
+  "references": [
+    "https://www.crowdstrike.com/blog/big-game-hunting-with-ryuk-another-lucrative-targeted-ransomware/",
+    "https://research.checkpoint.com/2018/ryuk-ransomware-targeted-campaign-break/",
+    "https://www.fireeye.com/blog/threat-research/2019/01/a-nasty-trick-from-credential-theft-malware-to-business-disruption.html",
+    "https://www.cisa.gov/uscert/ncas/alerts/aa20-302a"
+  ]
+}
