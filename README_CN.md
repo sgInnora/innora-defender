@@ -1,4 +1,4 @@
-# Innora-Defender: 勒索软件检测与恢复模块
+# Innora-Defender: 高级勒索软件解密框架
 
 <div align="center">
 <p>
@@ -18,34 +18,30 @@
 
 ## 项目概述
 
-**Innora-Defender** 是一个全面的勒索软件检测、分析和恢复模块，作为 Innora-Sentinel 网络安全平台的核心组件。该系统通过静态分析、动态执行、内存取证和网络流量监控的组合，提供识别、分析和应对勒索软件威胁的高级功能。
+**Innora-Defender** 是一个全面的勒索软件解密框架，专注于帮助受害者在不支付赎金的情况下恢复文件。我们的系统结合了先进的密码分析、内存取证和二进制分析，以恢复加密密钥并解密受各种勒索软件家族影响的文件。
 
 ### 核心功能
 
-- **自动化勒索软件分析**：端到端工作流程，用于分析可疑的勒索软件样本
-- **家族检测引擎**：高精度识别特定勒索软件家族
-- **高级文件恢复**：专用工具，用于恢复已知勒索软件家族加密的文件
-- **内存取证**：从内存转储中提取加密密钥和工件
-- **网络密钥恢复**：分析网络流量以捕获加密密钥和命令与控制通信
-- **AI增强检测**：结合机器学习和大型语言模型，勒索软件检测准确率达97%
-- **两阶段检测系统**：结合传统ML和基于LLM的分析实现全面检测
-- **多模态融合**：通过注意力机制集成静态、动态和网络特征
-- **增量学习**：对新的勒索软件变种和策略自动适应
-- **威胁情报集成**：将发现与外部威胁情报源关联
-- **YARA规则生成**：根据分析结果自动生成检测规则
-- **勒索软件关系可视化**：显示不同勒索软件家族和变种之间的连接
+- **专业解密工具**：业界领先的LockBit、BlackCat等主要勒索软件家族恢复工具
+- **多阶段密钥恢复**：从内存、网络流量和二进制分析中提取加密密钥的高级技术
+- **增强的文件格式分析**：智能恢复被损坏的文件和复杂的加密结构
+- **内存取证**：利用高级模式识别从内存转储中提取加密密钥和工件
+- **优化的恢复算法**：支持AES-CBC、ChaCha20和多种自定义加密方案
+- **自动化家族检测**：高精度识别特定勒索软件家族，应用正确的解密技术
+- **多勒索软件恢复框架**：处理不同勒索软件家族的统一方法
+- **二进制分析工具**：识别勒索软件实现中的弱点，实现解密
+- **部分恢复能力**：即使在无法完全解密的情况下也能恢复数据
 
 ## 项目结构
 
 ```
 innora-defender/
-├── ai_detection/              # 勒索软件检测的机器学习模型
-├── behavior_analysis/         # 勒索软件行为的动态分析
-├── decryption_tools/          # 加密文件恢复工具
-├── memory_analysis/           # 用于密钥提取的内存取证
-├── sandboxes/                 # 样本执行的隔离环境
-├── threat_intel/              # 威胁情报集成组件
-├── tools/                     # 各种分析功能的实用工具
+├── decryption_tools/          # 勒索软件特定解密工具
+├── tools/                     # 分析和恢复工具
+│   ├── crypto/                # 密码分析工具
+│   ├── memory/                # 用于密钥提取的内存取证
+│   ├── static/                # 二进制分析工具
+├── threat_intel/              # 勒索软件家族信息
 ├── utils/                     # 通用工具和辅助函数
 └── docs/                      # 文档和技术指南
 ```
@@ -56,7 +52,7 @@ innora-defender/
 
 - Python 3.9 或更高版本
 - 所需的Python包（参见 `requirements.txt`）
-- 可选：Docker用于容器化执行
+- 可选：内存分析工具（Volatility）
 
 ### 设置步骤
 
@@ -71,82 +67,166 @@ innora-defender/
    pip install -r requirements.txt
    ```
 
-3. 配置系统：
-   ```bash
-   python -m setup.configure
-   ```
-
 ## 使用方法
 
-### 基本分析
+### LockBit解密
 
 ```python
-from innora_defender import RansomwareAnalyzer
+from decryption_tools.network_forensics.lockbit_optimized_recovery import OptimizedLockBitRecovery
 
-# 初始化分析器
-analyzer = RansomwareAnalyzer()
+# 初始化优化的LockBit恢复模块
+recovery = OptimizedLockBitRecovery()
 
-# 分析可疑文件
-results = analyzer.analyze_file("path/to/suspicious_file")
+# 解密单个加密文件
+success = recovery.decrypt_file(
+    encrypted_file="path/to/encrypted_file.docx.{1765FE8E-2103-66E3-7DCB-72284ABD03AA}",
+    output_file="path/to/recovered_file.docx"
+)
 
-# 打印分析结果
-print(f"勒索软件家族: {results.family}")
-print(f"检测置信度: {results.confidence}%")
-print(f"加密算法: {results.encryption_algorithm}")
+if success:
+    print("文件成功解密")
+
+# 批量解密多个文件
+results = recovery.batch_decrypt(
+    encrypted_files=["file1.xlsx.{1765FE8E-2103-66E3-7DCB-72284ABD03AA}", "file2.pdf.{1765FE8E-2103-66E3-7DCB-72284ABD03AA}"],
+    output_dir="recovered_files"
+)
+
+# 导出成功的密钥供将来使用
+recovery.export_successful_keys("lockbit_successful_keys.json")
 ```
 
-### 尝试解密
+### 多勒索软件恢复
 
 ```python
-from innora_defender import RecoveryEngine
+from decryption_tools.multi_ransomware_recovery import MultiRecoveryOrchestrator
 
-# 初始化恢复引擎
-recovery = RecoveryEngine()
+# 初始化恢复协调器
+recovery = MultiRecoveryOrchestrator()
 
-# 尝试解密文件
-success = recovery.attempt_decryption(
+# 尝试解密文件（自动勒索软件家族检测）
+result = recovery.decrypt_file(
     encrypted_file="path/to/encrypted_file",
     output_file="path/to/recovered_file"
 )
 
-if success:
-    print("文件成功恢复")
-else:
-    print("恢复失败")
+print(f"解密成功: {result['success']}")
+print(f"勒索软件家族: {result['family']}")
+print(f"使用方法: {result['method']}")
 ```
 
-### 内存分析
+### 基于内存的密钥提取
 
 ```python
-from innora_defender import MemoryAnalyzer
+from tools.memory.key_extractors.advanced_memory_key_extractor import AdvancedMemoryKeyExtractor
 
-# 初始化内存分析器
-memory = MemoryAnalyzer()
+# 初始化高级内存密钥提取器
+extractor = AdvancedMemoryKeyExtractor()
 
-# 从内存转储中提取加密密钥
-keys = memory.extract_keys("path/to/memory.dmp")
+# 从内存转储中提取加密密钥，可选择提供勒索软件家族提示
+keys = extractor.scan_memory_dump(
+    memory_path="path/to/memory.dmp",
+    ransomware_family="lockbit"  # 可选的家族提示
+)
 
-print(f"找到 {len(keys)} 个潜在加密密钥")
+for key in keys:
+    print(f"找到密钥: {key['data'].hex()[:16]}... (置信度: {key['confidence']:.2f})")
+    print(f"算法: {key['algorithm']}, 偏移量: {key['offset']}")
 ```
 
-## 与 Innora-Sentinel 的集成
+### 二进制分析
 
-Innora-Defender 旨在与 Innora-Sentinel 网络安全平台无缝集成：
+```python
+from tools.static.binary_analyzer import RansomwareBinaryAnalyzer
 
-- **API集成**：通过Sentinel API连接实现自动化分析
-- **共享威胁情报**：向中央威胁情报数据库贡献并从中受益
-- **协调响应**：通过Sentinel编排引擎触发自动响应操作
-- **统一报告**：在Sentinel控制面板中集成报告
+# 初始化二进制分析器
+analyzer = RansomwareBinaryAnalyzer()
+
+# 分析勒索软件二进制文件
+results = analyzer.analyze_binary("path/to/ransomware_sample")
+
+# 打印分析结果
+print(f"检测到的算法: {results['static_analysis']['crypto']['detected_algorithms']}")
+print(f"发现的弱点: {len(results['weaknesses'])}")
+print(f"潜在密钥: {len(results['potential_keys'])}")
+```
 
 ## 文档
 
 详细文档请参见 `docs/` 目录：
-- [技术架构](docs/PROJECT_OVERVIEW.md)
-- [API参考](docs/IMPLEMENTATION_SUMMARY.md)
-- [开发指南](docs/FUTURE_DEVELOPMENT_PLAN.md)
-- [机器学习增强](docs/MACHINE_LEARNING_ENHANCEMENT_CN.md)
-- [机器学习增强更新日志](docs/MACHINE_LEARNING_ENHANCEMENT_UPDATE_LOG_CN.md)
-- [LockBit分析案例研究](docs/LOCKBIT_DECRYPTION_OPTIMIZATION.md)
+
+### 解密文档
+- [LockBit解密优化](docs/LOCKBIT_DECRYPTION_OPTIMIZATION.md) - 关于我们业界领先的LockBit恢复技术详情
+- [增强解密能力计划](docs/DECRYPTION_CAPABILITIES_PLAN.md) - 多家族解密支持路线图
+- [未来发展计划](docs/FUTURE_DEVELOPMENT_PLAN_CN_UPDATED.md) - 聚焦解密能力的更新计划
+
+### 技术文档
+- [勒索软件关系图](docs/RANSOMWARE_RELATIONSHIP_GRAPH.md) - 勒索软件家族间连接可视化
+- [实现概要](docs/IMPLEMENTATION_SUMMARY_CN.md) - 项目技术概述
+- [项目概览](docs/PROJECT_OVERVIEW_CN.md) - 架构和设计原则
+
+### 机器学习文档
+- [机器学习增强](docs/MACHINE_LEARNING_ENHANCEMENT_CN.md) - 基于AI的检测能力
+- [机器学习增强更新日志](docs/MACHINE_LEARNING_ENHANCEMENT_UPDATE_LOG_CN.md) - 机器学习改进历史
+
+## 测试与质量保证
+
+我们对代码维持严格的质量标准，特别是针对安全关键组件：
+
+### 覆盖率要求与状态
+
+- **安全关键模块**：最低95%测试覆盖率
+  - ✅ YARA增强生成器：95%覆盖率
+  - ✅ LockBit优化恢复：96%覆盖率
+  - ⚠️ YARA集成：87%覆盖率（进行中）
+  - ⚠️ YARA命令行：78%覆盖率（进行中）
+- **核心组件**：最低90%测试覆盖率
+- **工具模块**：最低80%测试覆盖率
+
+### 运行测试
+
+```bash
+# 运行所有测试
+python tests/run_all_tests.py
+
+# 运行YARA测试并测量覆盖率
+python tests/run_yara_tests.py
+
+# 为特定模块运行增强测试
+python tests/run_enhanced_tests.py --module lockbit
+python tests/run_enhanced_tests.py --module yara
+
+# 验证安全关键模块的覆盖率
+tests/check_security_coverage.sh
+```
+
+### 测试覆盖率可视化
+
+我们的综合测试套件包括对关键操作的性能测量：
+
+```
+大文件分析：0.50秒
+熵计算：处理1,049,397字节需要0.20秒
+字符串特征提取：处理大文件需要0.03秒
+规则优化：处理1,000个特征<0.01秒
+```
+
+### 设置Git钩子
+
+我们提供Git钩子以确保提交前的代码质量：
+
+```bash
+# 安装Git钩子
+./install_git_hooks.sh
+```
+
+这将安装一个前置提交钩子，在允许提交前检查安全关键模块的覆盖率。
+
+有关我们测试方法的更多信息，请参阅：
+- [维护测试覆盖率](docs/MAINTAINING_TEST_COVERAGE.md)
+- [测试覆盖率报告](test_coverage_report.md)
+- [YARA覆盖率改进](tests/FINAL_COVERAGE_REPORT.md)
+- [测试覆盖率改进计划](tests/TEST_COVERAGE_IMPROVEMENT_PLAN.md)
 
 ## 贡献
 
@@ -155,11 +235,6 @@ Innora-Defender 旨在与 Innora-Sentinel 网络安全平台无缝集成：
 ## 许可证
 
 该项目根据MIT许可证授权 - 详情请参见 [LICENSE](LICENSE) 文件。
-
-## 致谢
-
-- 该项目整合了各种开源勒索软件分析工具的组件
-- 特别感谢发布勒索软件技术研究成果的研究团队
 
 ## 安全
 

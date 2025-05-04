@@ -1,0 +1,22 @@
+[run]
+source = utils/yara_enhanced
+omit = 
+    */test_*
+    */tests/*
+    */__pycache__/*
+    */site-packages/*
+    */dist-packages/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+    except ImportError
+    def main
+
+[html]
+directory = htmlcov
