@@ -2006,68 +2006,199 @@ class StreamingDecryptionEngine:
             **kwargs: Additional decryption parameters
                 auto_detect: Whether to automatically detect the encryption algorithm
                 retry_algorithms: Whether to try multiple algorithms if first attempt fails
+                validation_level: Level of validation to perform on decrypted output
+                force_overwrite: Whether to overwrite output file if it exists
+                max_retries: Maximum number of retry attempts (for all strategies combined)
+                recovery_threshold: Minimum ratio (0.0-1.0) of successful blocks to consider partial success
                 
         Returns:
-            Result dictionary
+            Result dictionary with detailed information about the decryption process
         """
-        # Initialize result dictionary with default error state
+        start_time = time.time()
+        
+        # Initialize result dictionary with comprehensive error tracking
         result = {
             "success": False,
             "encrypted_file": encrypted_file,
             "output_file": output_file,
-            "errors": []
+            "file_exists": False,
+            "file_size": 0,
+            "errors": [],
+            "error_categories": {
+                "file_access": [],     # File existence, permissions, etc.
+                "output_error": [],    # Issues with output file/directory
+                "parameter_error": [], # Issues with decryption parameters
+                "algorithm_error": [], # Issues with algorithms
+                "decryption_error": [], # Issues during actual decryption
+                "validation_error": [], # Issues validating decrypted output
+                "system_error": []     # OS, memory, etc. errors
+            },
+            "warnings": [],
+            "processing_time_ms": 0,
+            "timestamp": datetime.now().isoformat()
         }
         
-        # Verify that the encrypted file exists
-        if not os.path.exists(encrypted_file):
-            result["errors"].append(f"Input file not found: {encrypted_file}")
-            result["error"] = f"Input file not found: {encrypted_file}"
+        # Input validation - Check all required parameters with detailed error messages
+        
+        # 1. Verify encrypted file parameter
+        if not encrypted_file:
+            error_msg = "Input file path not provided"
+            result["errors"].append(error_msg)
+            result["error_categories"]["parameter_error"].append(error_msg)
+            result["error"] = error_msg
             return result
             
-        # Check if we can read the encrypted file
-        if not os.access(encrypted_file, os.R_OK):
-            result["errors"].append(f"Input file not readable: {encrypted_file}")
-            result["error"] = f"Input file not readable: {encrypted_file}"
-            return result
-        
-        # Verify key is present
-        if key is None:
-            result["errors"].append("Decryption key is required")
-            result["error"] = "Decryption key is required"
-            return result
-        
-        # Ensure output directory exists
-        output_dir = os.path.dirname(output_file)
-        if output_dir and not os.path.exists(output_dir):
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-                logger.info(f"Created output directory: {output_dir}")
-            except (IOError, OSError, PermissionError) as e:
-                result["errors"].append(f"Cannot create output directory: {e}")
-                result["error"] = f"Cannot create output directory: {e}"
-                return result
-        
-        # Check if output location is writable
+        # 2. Verify that the encrypted file exists and is accessible
         try:
-            # Attempt to write a test file to check permissions
-            test_file = os.path.join(output_dir, ".test_write_permission")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.remove(test_file)
-        except (IOError, OSError, PermissionError) as e:
-            result["errors"].append(f"Output location not writable: {e}")
-            result["error"] = f"Output location not writable: {e}"
+            if not os.path.exists(encrypted_file):
+                error_msg = f"Input file not found: {encrypted_file}"
+                result["errors"].append(error_msg)
+                result["error_categories"]["file_access"].append(error_msg)
+                result["error"] = error_msg
+                return result
+                
+            result["file_exists"] = True
+            
+            # Get file size and metadata
+            try:
+                file_stat = os.stat(encrypted_file)
+                result["file_size"] = file_stat.st_size
+                result["file_modified"] = datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+                
+                # Check if file is empty
+                if file_stat.st_size == 0:
+                    warning = f"Input file is empty: {encrypted_file}"
+                    result["warnings"].append(warning)
+                    logger.warning(warning)
+            except (OSError, IOError) as e:
+                warning = f"Unable to get file metadata: {e}"
+                result["warnings"].append(warning)
+                logger.warning(warning)
+            
+            # Check if we can read the encrypted file
+            if not os.access(encrypted_file, os.R_OK):
+                error_msg = f"Input file not readable: {encrypted_file}"
+                result["errors"].append(error_msg)
+                result["error_categories"]["file_access"].append(error_msg)
+                result["error"] = error_msg
+                return result
+        except Exception as e:
+            error_msg = f"Error verifying input file: {e}"
+            result["errors"].append(error_msg)
+            result["error_categories"]["file_access"].append(error_msg)
+            result["error"] = error_msg
             return result
         
+        # 3. Verify key is present and valid
+        if key is None:
+            error_msg = "Decryption key is required"
+            result["errors"].append(error_msg)
+            result["error_categories"]["parameter_error"].append(error_msg)
+            result["error"] = error_msg
+            return result
+        
+        try:
+            # Validate key is bytes
+            if not isinstance(key, bytes):
+                try:
+                    key = bytes(key)
+                    warning = "Key converted to bytes from other type"
+                    result["warnings"].append(warning)
+                except Exception as e:
+                    error_msg = f"Invalid key type, must be bytes: {e}"
+                    result["errors"].append(error_msg)
+                    result["error_categories"]["parameter_error"].append(error_msg)
+                    result["error"] = error_msg
+                    return result
+            
+            # Check key length (most algorithms need at least 16 bytes)
+            if len(key) < 16:
+                warning = f"Key length ({len(key)} bytes) may be too short for most algorithms"
+                result["warnings"].append(warning)
+                logger.warning(warning)
+            
+            # Record key info (length only, not the actual key)
+            result["key_length"] = len(key)
+        except Exception as e:
+            error_msg = f"Error validating key: {e}"
+            result["errors"].append(error_msg)
+            result["error_categories"]["parameter_error"].append(error_msg)
+            result["error"] = error_msg
+            return result
+        
+        # 4. Validate output path and ensure output directory exists
+        try:
+            # Verify output file parameter
+            if not output_file:
+                error_msg = "Output file path not provided"
+                result["errors"].append(error_msg)
+                result["error_categories"]["parameter_error"].append(error_msg)
+                result["error"] = error_msg
+                return result
+                
+            # Check if output file already exists
+            if os.path.exists(output_file):
+                force_overwrite = kwargs.get("force_overwrite", False)
+                if not force_overwrite:
+                    error_msg = f"Output file already exists: {output_file}. Use force_overwrite=True to overwrite."
+                    result["errors"].append(error_msg)
+                    result["error_categories"]["output_error"].append(error_msg)
+                    result["error"] = error_msg
+                    return result
+                else:
+                    warning = f"Overwriting existing output file: {output_file}"
+                    result["warnings"].append(warning)
+                    logger.warning(warning)
+            
+            # Ensure output directory exists
+            output_dir = os.path.dirname(output_file)
+            if output_dir and not os.path.exists(output_dir):
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    logger.info(f"Created output directory: {output_dir}")
+                except (IOError, OSError, PermissionError) as e:
+                    error_msg = f"Cannot create output directory: {e}"
+                    result["errors"].append(error_msg)
+                    result["error_categories"]["output_error"].append(error_msg)
+                    result["error"] = error_msg
+                    return result
+            
+            # Check if output location is writable
+            try:
+                # Attempt to write a test file to check permissions
+                test_file = os.path.join(output_dir, ".test_write_permission")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.remove(test_file)
+            except (IOError, OSError, PermissionError) as e:
+                error_msg = f"Output location not writable: {e}"
+                result["errors"].append(error_msg)
+                result["error_categories"]["output_error"].append(error_msg)
+                result["error"] = error_msg
+                return result
+        except Exception as e:
+            error_msg = f"Error validating output path: {e}"
+            result["errors"].append(error_msg)
+            result["error_categories"]["output_error"].append(error_msg)
+            result["error"] = error_msg
+            return result
+            
         # Extract parameters
         auto_detect = kwargs.pop("auto_detect", False)
         retry_algorithms = kwargs.pop("retry_algorithms", False)
+        max_retries = kwargs.pop("max_retries", 3)
+        recovery_threshold = kwargs.pop("recovery_threshold", 0.7)  # 70% success is default threshold
         
         # Store original parameters for potential retry
         original_kwargs = kwargs.copy()
         
+        # Track all attempted algorithms for reporting
+        attempted_algorithms = []
+        
         try:
-            # Auto-detect algorithm if requested or if family not provided
+            # 1. Algorithm Detection Phase
+            
+            # Detect algorithm if auto-detect is enabled or family not provided
             if auto_detect or not family:
                 logger.info("Using automatic algorithm detection")
                 try:
@@ -2076,10 +2207,20 @@ class StreamingDecryptionEngine:
                     # Copy any errors from detection to our result
                     if "errors" in detection_result and detection_result["errors"]:
                         result["errors"].extend(detection_result["errors"])
+                        # Categorize algorithm detection errors
+                        for error in detection_result["errors"]:
+                            result["error_categories"]["algorithm_error"].append(error)
                     
                     detected_algorithm = detection_result["algorithm"]
                     detected_params = detection_result["params"]
                     confidence = detection_result["confidence"]
+                    
+                    # Record detection results
+                    result["algorithm_detection"] = {
+                        "algorithm": detected_algorithm,
+                        "confidence": confidence,
+                        "detected_family": detection_result.get("family")
+                    }
                     
                     logger.info(f"Detected algorithm: {detected_algorithm} (confidence: {confidence:.2f})")
                     
@@ -2087,7 +2228,9 @@ class StreamingDecryptionEngine:
                     try:
                         algorithm, params = self._get_family_config(family, key, **kwargs)
                     except Exception as e:
-                        result["errors"].append(f"Error in family configuration: {e}")
+                        error_msg = f"Error in family configuration: {e}"
+                        result["errors"].append(error_msg)
+                        result["error_categories"]["parameter_error"].append(error_msg)
                         # Use detected algorithm as a fallback
                         algorithm = detected_algorithm
                         params = {}
@@ -2102,27 +2245,46 @@ class StreamingDecryptionEngine:
                         # Use detected algorithm if no family specified or detection is very confident
                         if not family or confidence > 0.85:
                             algorithm = detected_algorithm
+                    
+                    # Record the final algorithm chosen
+                    result["algorithm"] = algorithm
+                    result["detection_override"] = family is not None and confidence > 0.85
                             
                 except Exception as e:
                     # If algorithm detection fails, log the error and use defaults
-                    result["errors"].append(f"Algorithm detection failed: {e}")
+                    error_msg = f"Algorithm detection failed: {e}"
+                    result["errors"].append(error_msg)
+                    result["error_categories"]["algorithm_error"].append(error_msg)
                     logger.error(f"Algorithm detection failed: {e}")
                     algorithm = "aes-cbc"  # Default algorithm as fallback
                     params = {}
+                    result["algorithm"] = algorithm
+                    result["algorithm_detection_failed"] = True
             else:
                 # Get algorithm and parameters using family-based approach
                 try:
                     algorithm, params = self._get_family_config(family, key, **kwargs)
+                    result["algorithm"] = algorithm
+                    result["family_based_algorithm"] = True
                 except Exception as e:
-                    result["errors"].append(f"Error in family configuration: {e}")
+                    error_msg = f"Error in family configuration: {e}"
+                    result["errors"].append(error_msg)
+                    result["error_categories"]["parameter_error"].append(error_msg)
                     logger.error(f"Error getting family configuration: {e}")
                     algorithm = "aes-cbc"  # Default
                     params = {}
+                    result["algorithm"] = algorithm
+                    result["family_config_failed"] = True
             
             # Apply our defaults
             params["validation_level"] = kwargs.get("validation_level", self.validation_level)
             params["use_threading"] = kwargs.get("use_threading", self.use_threading)
             params["chunk_size"] = kwargs.get("chunk_size", self.chunk_size)
+            
+            # 2. Primary Decryption Attempt
+            
+            # Add algorithm to attempted list
+            attempted_algorithms.append(algorithm)
             
             # Call decryptor
             try:
@@ -2131,19 +2293,64 @@ class StreamingDecryptionEngine:
                 # Merge the decryptor result with our result
                 result.update(decrypt_result)
                 
-                # Ensure errors are propagated
+                # Ensure errors are propagated and categorized
                 if "errors" in decrypt_result and decrypt_result["errors"]:
                     if "errors" not in result:
                         result["errors"] = []
-                    result["errors"].extend(decrypt_result["errors"])
+                    
+                    for error in decrypt_result["errors"]:
+                        if error not in result["errors"]:  # Avoid duplicates
+                            result["errors"].append(error)
+                            
+                            # Categorize the error based on content
+                            error_lower = error.lower()
+                            if any(kw in error_lower for kw in ["file", "directory", "permission", "access", "read", "write", "open"]):
+                                result["error_categories"]["file_access"].append(error)
+                            elif any(kw in error_lower for kw in ["output", "destination", "write"]):
+                                result["error_categories"]["output_error"].append(error)
+                            elif any(kw in error_lower for kw in ["parameter", "argument", "key", "iv", "nonce"]):
+                                result["error_categories"]["parameter_error"].append(error)
+                            elif any(kw in error_lower for kw in ["algorithm", "detect", "unsupported"]):
+                                result["error_categories"]["algorithm_error"].append(error)
+                            elif any(kw in error_lower for kw in ["decrypt", "process", "stream", "buffer"]):
+                                result["error_categories"]["decryption_error"].append(error)
+                            elif any(kw in error_lower for kw in ["validation", "verify", "entropy"]):
+                                result["error_categories"]["validation_error"].append(error)
+                            else:
+                                result["error_categories"]["system_error"].append(error)
                 
             except Exception as e:
-                result["errors"].append(f"Decryption error: {e}")
-                result["error"] = f"Decryption error: {e}"
+                error_msg = f"Decryption error with {algorithm}: {e}"
+                result["errors"].append(error_msg)
+                result["error_categories"]["decryption_error"].append(error_msg)
+                result["error"] = error_msg
                 result["success"] = False
             
+            # 3. Retry Phase (if needed and enabled)
+            
+            retry_count = 0
+            
+            # Check for partial success - file was created but validation failed
+            partial_success = False
+            if not result.get("success", False) and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                partial_success = True
+                result["partial_success"] = True
+                result["partial_output_size"] = os.path.getsize(output_file)
+                
+                # If validation failed but file was created with reasonable size, note this
+                if result["file_size"] > 0:  # Protect against division by zero
+                    recovery_ratio = result["partial_output_size"] / result["file_size"]
+                    result["recovery_ratio"] = recovery_ratio
+                    
+                    # If recovery ratio exceeds threshold, mark as recovered
+                    if recovery_ratio >= recovery_threshold:
+                        result["recovered"] = True
+                        warning = f"File partially recovered ({recovery_ratio:.1%} of original size)"
+                        result["warnings"].append(warning)
+                        logger.warning(warning)
+            
             # If decryption failed and retry_algorithms is enabled, try alternative algorithms
-            if not result.get("success", False) and retry_algorithms:
+            if not result.get("success", False) and not result.get("recovered", False) and retry_algorithms:
                 # Define alternative algorithms to try based on initial algorithm
                 alternatives = {
                     "aes-cbc": ["aes-ecb", "chacha20", "salsa20"],
@@ -2155,9 +2362,19 @@ class StreamingDecryptionEngine:
                 # Get alternatives for our algorithm
                 alt_algorithms = alternatives.get(algorithm, [])
                 
-                # Try each alternative
+                # Keep track of all retry results
+                retry_results = []
+                
+                # Try each alternative, up to max_retries
                 for alt_algorithm in alt_algorithms:
-                    logger.info(f"Retrying with alternative algorithm: {alt_algorithm}")
+                    if retry_count >= max_retries:
+                        break
+                    
+                    retry_count += 1
+                    logger.info(f"Retrying with alternative algorithm: {alt_algorithm} (attempt {retry_count}/{max_retries})")
+                    
+                    # Add to attempted algorithms list
+                    attempted_algorithms.append(alt_algorithm)
                     
                     # Reset params to original kwargs
                     params = original_kwargs.copy()
@@ -2181,9 +2398,20 @@ class StreamingDecryptionEngine:
                     try:
                         alt_result = self.decryptor.decrypt_file(encrypted_file, output_file, alt_algorithm, key, **params)
                         
+                        # Save this result for comparison
+                        retry_results.append({
+                            "algorithm": alt_algorithm,
+                            "success": alt_result.get("success", False),
+                            "validation": alt_result.get("validation", {}),
+                            "errors": alt_result.get("errors", [])
+                        })
+                        
                         # Merge any errors from the alternative attempt
                         if "errors" in alt_result and alt_result["errors"]:
-                            result["errors"].extend(alt_result["errors"])
+                            for error in alt_result["errors"]:
+                                if error not in result["errors"]:  # Avoid duplicates
+                                    result["errors"].append(error)
+                                    # We could categorize here too, but this is less important for retry attempts
                         
                         # If successful, use this result
                         if alt_result.get("success", False):
@@ -2191,21 +2419,104 @@ class StreamingDecryptionEngine:
                             result.update(alt_result)
                             result["algorithm"] = alt_algorithm  # Make sure algorithm is recorded
                             result["algorithm_retry"] = True
+                            result["algorithm_retry_count"] = retry_count
                             break
+                        
+                        # Check for partial success
+                        if not alt_result.get("success", False) and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                            # Only update if this partial result is better than previous attempts
+                            current_partial_size = result.get("partial_output_size", 0)
+                            new_partial_size = os.path.getsize(output_file)
+                            
+                            if new_partial_size > current_partial_size:
+                                # This is a better partial result, update it
+                                result["partial_success"] = True
+                                result["partial_output_size"] = new_partial_size
+                                result["partial_algorithm"] = alt_algorithm
+                                
+                                if result["file_size"] > 0:  # Protect against division by zero
+                                    recovery_ratio = new_partial_size / result["file_size"]
+                                    result["recovery_ratio"] = recovery_ratio
+                                    
+                                    # If recovery ratio exceeds threshold, mark as recovered
+                                    if recovery_ratio >= recovery_threshold:
+                                        result["recovered"] = True
+                                        warning = f"File partially recovered with {alt_algorithm} ({recovery_ratio:.1%} of original size)"
+                                        result["warnings"].append(warning)
+                                        logger.warning(warning)
+                                        
+                                        # Partial success is considered good enough, stop retrying
+                                        if result.get("recovered", False):
+                                            break
+                                
                     except Exception as e:
-                        result["errors"].append(f"Alternative algorithm {alt_algorithm} error: {e}")
+                        error_msg = f"Alternative algorithm {alt_algorithm} error: {e}"
+                        result["errors"].append(error_msg)
+                        result["error_categories"]["algorithm_error"].append(error_msg)
                         # Continue to the next algorithm
+                
+                # Store retry statistics
+                result["retry_attempts"] = retry_count
+                result["attempted_algorithms"] = attempted_algorithms
+                
+                if retry_results:
+                    result["retry_results"] = retry_results
             
-            # Include algorithm information in the result
-            result["algorithm"] = algorithm
+            # Record family information
             result["family"] = family
+            
+            # Record final status based on all attempts
+            if not result.get("success", False) and result.get("recovered", False):
+                # Partial recovery case
+                warning = "File was partially recovered but validation failed"
+                if warning not in result["warnings"]:
+                    result["warnings"].append(warning)
+                
+                # Set a specific error message
+                if not "error" in result:
+                    result["error"] = "Full decryption failed, but partial recovery succeeded"
             
         except Exception as e:
             # Catch-all for any unforeseen errors
-            result["errors"].append(f"Unexpected error in decrypt_file: {e}")
-            result["error"] = f"Unexpected error: {e}"
+            error_msg = f"Unexpected error in decrypt_file: {e}"
+            result["errors"].append(error_msg)
+            result["error_categories"]["system_error"].append(error_msg)
+            result["error"] = error_msg
             result["success"] = False
             logger.error(f"Unexpected error in decrypt_file: {e}", exc_info=True)
+        
+        # 4. Results Phase
+        
+        # Check for file creation even if reported as failure
+        if not result.get("success", False) and not result.get("partial_success", False):
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                result["partial_success"] = True
+                result["partial_output_size"] = os.path.getsize(output_file)
+                warning = "Output file was created but not marked as success or partial success"
+                result["warnings"].append(warning)
+        
+        # Add timing information
+        processing_time = time.time() - start_time
+        result["processing_time_ms"] = int(processing_time * 1000)
+        result["processing_time_s"] = round(processing_time, 3)
+        
+        # Add error summary
+        error_count = len(result["errors"])
+        if error_count > 0:
+            result["error_count"] = error_count
+            
+            # Add count of errors by category
+            category_counts = {}
+            for category, errors in result["error_categories"].items():
+                if errors:
+                    category_counts[category] = len(errors)
+            
+            if category_counts:
+                result["error_category_counts"] = category_counts
+        
+        # Set a summary error if not already set
+        if not result.get("success", False) and not "error" in result and result["errors"]:
+            result["error"] = result["errors"][0]  # Use the first error as the summary
         
         return result
     
