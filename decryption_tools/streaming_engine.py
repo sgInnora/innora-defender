@@ -1694,51 +1694,146 @@ class AlgorithmDetector:
             if not isinstance(data, bytes):
                 # Try to convert to bytes if possible
                 try:
-                    data = bytes(data)
-                except (TypeError, ValueError):
-                    # If conversion fails, return a default value
+                    # Try different approaches for different input types
+                    if isinstance(data, bytearray):
+                        data = bytes(data)
+                    elif isinstance(data, str):
+                        data = data.encode('utf-8', errors='replace')
+                    elif isinstance(data, memoryview):
+                        data = bytes(data)
+                    elif hasattr(data, 'tobytes'):
+                        # For numpy arrays or similar objects
+                        data = data.tobytes()
+                    elif hasattr(data, 'read'):
+                        # File-like objects
+                        current_pos = data.tell()
+                        data = data.read()
+                        try:
+                            data.seek(current_pos)  # Restore position
+                        except:
+                            pass  # Ignore if seek fails
+                    else:
+                        # Last resort - try generic conversion
+                        data = bytes(data)
+                except (TypeError, ValueError, AttributeError, IOError) as specific_err:
+                    logger.debug(f"Specific error converting data to bytes: {type(specific_err).__name__}: {specific_err}")
+                    return 5.0  # Middle-of-the-road value
+                except Exception as e:
+                    logger.debug(f"Generic error converting data to bytes: {type(e).__name__}: {e}")
                     return 5.0  # Middle-of-the-road value
             
-            # Calculate byte frequency with error handling
+            # Check for corrupted or restricted data
+            try:
+                data_length = len(data)
+                if data_length == 0:
+                    return 0.0
+            except (TypeError, ValueError, OverflowError) as e:
+                logger.debug(f"Error checking data length: {type(e).__name__}: {e}")
+                return 5.0  # Middle-of-the-road value
+            
+            # Limit size for performance reasons
+            if data_length > 100000:
+                # Sample the data for large inputs
+                sample_size = 50000
+                samples = []
+                
+                # Take samples from beginning, middle, and end
+                try:
+                    samples.append(data[:sample_size//3])
+                    mid_start = (data_length - sample_size//3) // 2
+                    samples.append(data[mid_start:mid_start + sample_size//3])
+                    samples.append(data[-sample_size//3:])
+                    data = b''.join(samples)
+                except Exception as e:
+                    logger.debug(f"Error sampling large data: {type(e).__name__}: {e}")
+                    # Just use the first chunk if sampling fails
+                    try:
+                        data = data[:sample_size]
+                    except Exception:
+                        return 5.0  # Default value if everything fails
+            
+            # Calculate byte frequency with multiple fallback methods
             counter = {}
             try:
+                # Method 1: Direct iteration
                 for byte in data:
                     if byte not in counter:
                         counter[byte] = 0
                     counter[byte] += 1
-            except Exception:
-                # If we can't iterate through data, use a simpler approach
+            except Exception as e:
+                logger.debug(f"Primary byte counting method failed: {type(e).__name__}: {e}")
                 try:
-                    # Try with bytearray conversion
+                    # Method 2: Bytearray conversion
                     for byte in bytearray(data):
                         if byte not in counter:
                             counter[byte] = 0
                         counter[byte] += 1
-                except Exception:
-                    # If all else fails, return a default value
-                    return 5.0
+                except Exception as e:
+                    logger.debug(f"Secondary byte counting method failed: {type(e).__name__}: {e}")
+                    try:
+                        # Method 3: Manual indexing
+                        for i in range(min(len(data), 10000)):  # Limit for safety
+                            byte = data[i]
+                            if byte not in counter:
+                                counter[byte] = 0
+                            counter[byte] += 1
+                    except Exception as e:
+                        logger.debug(f"Tertiary byte counting method failed: {type(e).__name__}: {e}")
+                        try:
+                            # Method 4: Using collections.Counter if available
+                            from collections import Counter
+                            counter = Counter(bytearray(data[:10000]))  # Convert to dict at the end if needed
+                        except Exception as e:
+                            logger.debug(f"All byte counting methods failed: {type(e).__name__}: {e}")
+                            # If all methods fail, use a pre-computed value that indicates
+                            # "uncertain, but likely encrypted" - slightly high entropy
+                            return 6.5
             
             # Safety check
             if not counter or len(data) == 0:
                 return 0
             
-            # Calculate entropy
+            # Calculate entropy with error protection
             try:
+                # Ensure all math imports are local to prevent global dependency
                 import math
                 entropy = 0
                 length = len(data)
                 for count in counter.values():
-                    probability = count / length
-                    entropy -= probability * (math.log(probability) / math.log(2))
+                    try:
+                        probability = count / length
+                        if probability > 0:  # Prevent log(0) errors
+                            entropy -= probability * (math.log(probability) / math.log(2))
+                    except (ZeroDivisionError, ValueError, OverflowError) as e:
+                        logger.debug(f"Error in entropy calculation for p={count}/{length}: {type(e).__name__}: {e}")
+                        # Skip this value but continue calculating
+                        continue
                 
-                # Cap entropy at 8.0 for sanity
-                return min(entropy, 8.0)
-            except Exception:
-                # If math operations fail, return a default value
+                # Cap entropy at 8.0 for sanity and handle NaN/Inf
+                result = min(entropy, 8.0)
+                if math.isnan(result) or math.isinf(result):
+                    logger.debug(f"Entropy calculation resulted in {result}, using fallback")
+                    return 5.0  # Middle value as fallback
+                return result
+                
+            except ImportError:
+                logger.debug("Math module not available, using simplified entropy calculation")
+                # Very simple entropy approximation based on unique bytes ratio
+                try:
+                    unique_bytes = len(counter)
+                    byte_ratio = unique_bytes / 256  # Ratio of unique bytes to possible values
+                    return byte_ratio * 8.0  # Scale to 0-8 range
+                except Exception as e:
+                    logger.debug(f"Simplified entropy calculation failed: {type(e).__name__}: {e}")
+                    return 5.0
+                    
+            except Exception as e:
+                logger.debug(f"Entropy calculation failed: {type(e).__name__}: {e}")
                 return 5.0
                 
-        except Exception:
-            # Catch-all for any unforeseen errors
+        except Exception as e:
+            # Detailed logging of catch-all errors
+            logger.debug(f"Unexpected error in entropy calculation: {type(e).__name__}: {e}")
             return 5.0
     
     def _adjust_algorithm_params(self, result: Dict[str, Any]) -> None:
@@ -2297,13 +2392,40 @@ class StreamingDecryptionEngine:
                 adaptive_params: Whether to adapt parameters based on successful decryptions
                 parallel: Whether to use parallel processing with ThreadPoolExecutor
                 max_workers: Maximum number of worker threads for parallel processing
+                continue_on_error: Whether to continue processing files after errors (default True)
+                error_recovery_attempts: Number of recovery attempts for failed files (default 0)
+                sort_files_by: Sort files by 'name', 'size', 'ext', or None (default None)
+                batch_size: Maximum files to process in one batch (default all)
             
         Returns:
             Result dictionary with batch statistics
         """
+        batch_start_time = time.time()
+        
         # Create output directory if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
+        try:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            
+            # Check if output directory is writable
+            if not os.access(output_dir, os.W_OK):
+                return {
+                    "success": False,
+                    "total": len(file_list),
+                    "successful": 0,
+                    "failed": len(file_list),
+                    "error": f"Output directory not writable: {output_dir}",
+                    "errors": [f"Output directory not writable: {output_dir}"]
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "total": len(file_list),
+                "successful": 0,
+                "failed": len(file_list),
+                "error": f"Error creating output directory: {e}",
+                "errors": [f"Error creating output directory: {e}"]
+            }
         
         # Extract batch-specific parameters
         auto_detect = kwargs.pop("auto_detect", False)
@@ -2311,57 +2433,186 @@ class StreamingDecryptionEngine:
         adaptive_params = kwargs.pop("adaptive_params", True)
         parallel = kwargs.pop("parallel", False)
         max_workers = kwargs.pop("max_workers", max(1, (os.cpu_count() or 4) - 1))
+        continue_on_error = kwargs.pop("continue_on_error", True)
+        error_recovery_attempts = kwargs.pop("error_recovery_attempts", 0)
+        sort_files_by = kwargs.pop("sort_files_by", None)
+        batch_size = kwargs.pop("batch_size", len(file_list))
         
-        # Track results
+        # Input validation
+        if not isinstance(file_list, list):
+            return {
+                "success": False,
+                "error": "Input file_list must be a list",
+                "errors": ["Input file_list must be a list"]
+            }
+        
+        # Sort files if requested
+        sorted_files = file_list.copy()  # Make a copy to avoid modifying the original
+        
+        if sort_files_by is not None:
+            try:
+                if sort_files_by.lower() == 'name':
+                    sorted_files.sort()
+                elif sort_files_by.lower() == 'size':
+                    sorted_files.sort(key=lambda f: os.path.getsize(f) if os.path.exists(f) else 0)
+                elif sort_files_by.lower() == 'ext':
+                    sorted_files.sort(key=lambda f: os.path.splitext(f)[1].lower())
+            except Exception as e:
+                logger.warning(f"Error sorting files: {e}")
+                # Continue with unsorted files
+        
+        # Ensure batch_size is reasonable
+        batch_size = min(max(1, batch_size), len(sorted_files))
+        
+        # Limit to batch_size files
+        active_files = sorted_files[:batch_size]
+        
+        # Track results with enhanced details
         results = {
-            "total": len(file_list),
+            "total": len(active_files),
             "successful": 0,
             "failed": 0,
             "partial": 0,
             "files": [],
             "detected_algorithms": {},
-            "algorithm_success_rate": {}
+            "algorithm_success_rate": {},
+            "error_categories": {
+                "file_access": 0,
+                "output_error": 0,
+                "parameter_error": 0,
+                "algorithm_error": 0,
+                "decryption_error": 0,
+                "validation_error": 0,
+                "system_error": 0
+            },
+            "start_time": batch_start_time,
+            "end_time": None,
+            "processing_time_ms": 0,
+            "errors": [],
+            "warnings": []
         }
+        
+        # Create a thread lock for updating shared data in parallel mode
+        algorithm_stats_lock = threading.Lock()
         
         # For adaptive parameter learning
         successful_params = {}
         
         # Function to process a single file (for both sequential and parallel execution)
         def process_file(file_path):
+            start_time = time.time()
+            file_result = {
+                "input": file_path,
+                "success": False,
+                "file_exists": False,
+                "file_size": 0,
+                "timestamp": datetime.now().isoformat(),
+                "errors": [],
+                "error_categories": {
+                    "file_access": [],     # File existence, permissions, etc.
+                    "output_error": [],    # Issues with output file/directory
+                    "parameter_error": [], # Issues with decryption parameters
+                    "algorithm_error": [], # Issues with algorithms
+                    "decryption_error": [], # Issues during actual decryption
+                    "validation_error": [], # Issues validating decrypted output
+                    "system_error": []     # OS, memory, etc. errors
+                },
+                "warnings": [],
+                "processing_time_ms": 0
+            }
+            
             try:
-                # Validate file existence and readability
-                if not os.path.exists(file_path):
-                    return {
-                        "input": file_path,
-                        "success": False,
-                        "error": f"File not found: {file_path}",
-                        "errors": [f"File not found: {file_path}"]
-                    }
-                
-                if not os.access(file_path, os.R_OK):
-                    return {
-                        "input": file_path,
-                        "success": False,
-                        "error": f"File not readable: {file_path}",
-                        "errors": [f"File not readable: {file_path}"]
-                    }
-                
-                # Generate output path
+                # Validate file existence
                 try:
-                    file_name = os.path.basename(file_path)
-                    output_path = os.path.join(output_dir, file_name + ".decrypted")
+                    if not os.path.exists(file_path):
+                        error_msg = f"File not found: {file_path}"
+                        file_result["errors"].append(error_msg)
+                        file_result["error_categories"]["file_access"].append(error_msg)
+                        file_result["error"] = error_msg  # Summary error
+                        return file_result
+                    
+                    file_result["file_exists"] = True
+                    
+                    # Get file size
+                    try:
+                        file_result["file_size"] = os.path.getsize(file_path)
+                    except (OSError, IOError) as e:
+                        warning = f"Unable to get file size: {e}"
+                        file_result["warnings"].append(warning)
+                    
+                    # Check file readability
+                    if not os.access(file_path, os.R_OK):
+                        error_msg = f"File not readable: {file_path}"
+                        file_result["errors"].append(error_msg)
+                        file_result["error_categories"]["file_access"].append(error_msg)
+                        file_result["error"] = error_msg  # Summary error
+                        return file_result
                 except Exception as e:
-                    return {
-                        "input": file_path,
-                        "success": False,
-                        "error": f"Error generating output path: {e}",
-                        "errors": [f"Error generating output path: {e}"]
-                    }
+                    error_msg = f"Error verifying file status: {e}"
+                    file_result["errors"].append(error_msg)
+                    file_result["error_categories"]["file_access"].append(error_msg)
+                    file_result["error"] = error_msg  # Summary error
+                    return file_result
+                
+                # Generate output path with safe name handling
+                try:
+                    # Get base filename
+                    file_name = os.path.basename(file_path)
+                    
+                    # Handle potential naming issues
+                    if not file_name:
+                        file_name = "unknown_file"
+                    
+                    # Create sanitized output path
+                    output_path = os.path.join(output_dir, file_name + ".decrypted")
+                    
+                    # Check if output file already exists
+                    if os.path.exists(output_path):
+                        # Create unique filename by adding timestamp
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_path = os.path.join(output_dir, f"{file_name}_{timestamp}.decrypted")
+                        file_result["warnings"].append(f"Output file already exists, using alternate name: {output_path}")
+                    
+                    file_result["output"] = output_path
+                    
+                except Exception as e:
+                    error_msg = f"Error generating output path: {e}"
+                    file_result["errors"].append(error_msg)
+                    file_result["error_categories"]["output_error"].append(error_msg)
+                    file_result["error"] = error_msg
+                    return file_result
+                
+                # Verify output directory is writable
+                try:
+                    output_dir_path = os.path.dirname(output_path)
+                    if not os.path.exists(output_dir_path):
+                        try:
+                            os.makedirs(output_dir_path, exist_ok=True)
+                        except (OSError, IOError) as e:
+                            error_msg = f"Cannot create output directory: {e}"
+                            file_result["errors"].append(error_msg)
+                            file_result["error_categories"]["output_error"].append(error_msg)
+                            file_result["error"] = error_msg
+                            return file_result
+                    
+                    # Check if we can write to the directory
+                    if not os.access(output_dir_path, os.W_OK):
+                        error_msg = f"Output directory not writable: {output_dir_path}"
+                        file_result["errors"].append(error_msg)
+                        file_result["error_categories"]["output_error"].append(error_msg)
+                        file_result["error"] = error_msg
+                        return file_result
+                except Exception as e:
+                    error_msg = f"Error validating output directory: {e}"
+                    file_result["errors"].append(error_msg)
+                    file_result["error_categories"]["output_error"].append(error_msg)
+                    file_result["error"] = error_msg
+                    return file_result
                 
                 # Create a copy of kwargs for this file
                 file_kwargs = kwargs.copy()
                 
-                # If we have adaptive parameters and have learned from successful decryptions
+                # Apply adaptive parameters if available and enabled
                 if adaptive_params and successful_params:
                     try:
                         # Use adaptation based on file extension or characteristics
@@ -2369,24 +2620,33 @@ class StreamingDecryptionEngine:
                         
                         # If we have success parameters for this extension, use them
                         if file_ext in successful_params:
-                            adaptive_algo, adaptive_params = successful_params[file_ext]
+                            adaptive_algo, adaptive_params_dict = successful_params[file_ext]
                             
                             # Combine with original kwargs, but don't override explicit settings
-                            for param_name, param_value in adaptive_params.items():
+                            for param_name, param_value in adaptive_params_dict.items():
                                 if param_name not in file_kwargs:
                                     file_kwargs[param_name] = param_value
                             
                             # Only override algorithm if auto_detect is True or no family specified
                             if auto_detect or not family:
                                 file_kwargs["algorithm"] = adaptive_algo
-                        
-                        # Flag that we are using adaptive parameters
-                        file_kwargs["using_adaptive_params"] = True
+                            
+                            # Record what we're using
+                            file_result["adaptive_parameters"] = {
+                                "algorithm": adaptive_algo,
+                                "applied_params": list(adaptive_params_dict.keys())
+                            }
+                            
+                            # Flag that we are using adaptive parameters
+                            file_kwargs["using_adaptive_params"] = True
+                            file_result["used_adaptive_params"] = True
                     except Exception as e:
-                        logger.warning(f"Error applying adaptive parameters for {file_path}: {e}")
+                        warning = f"Error applying adaptive parameters: {e}"
+                        file_result["warnings"].append(warning)
+                        logger.warning(f"{warning} for {file_path}")
                         # Continue without adaptive params
                 
-                # Decrypt file
+                # Decrypt file with comprehensive error handling
                 try:
                     result = self.decrypt_file(
                         file_path, 
@@ -2397,14 +2657,62 @@ class StreamingDecryptionEngine:
                         retry_algorithms=retry_algorithms,
                         **file_kwargs
                     )
+                    
+                    # Copy core properties
+                    if "success" in result:
+                        file_result["success"] = result["success"]
+                    if "error" in result:
+                        file_result["error"] = result["error"]
+                    if "algorithm" in result:
+                        file_result["algorithm"] = result["algorithm"]
+                    if "partial_success" in result:
+                        file_result["partial_success"] = result["partial_success"]
+                    if "algorithm_retry" in result:
+                        file_result["algorithm_retry"] = result["algorithm_retry"]
+                        
+                    # Add any algorithm detection info
+                    if "confidence" in result:
+                        file_result["algorithm_confidence"] = result["confidence"]
+                    
+                    # Add validation info if present
+                    if "validation" in result:
+                        file_result["validation"] = result["validation"]
+                    
+                    # Copy all errors
+                    if "errors" in result and result["errors"]:
+                        # Add errors to the main errors list
+                        file_result["errors"].extend(result["errors"])
+                        
+                        # Categorize errors based on keywords
+                        for error in result["errors"]:
+                            error_lower = error.lower()
+                            if any(kw in error_lower for kw in ["file", "directory", "permission", "access", "read", "write", "open"]):
+                                file_result["error_categories"]["file_access"].append(error)
+                            elif any(kw in error_lower for kw in ["output", "destination", "write"]):
+                                file_result["error_categories"]["output_error"].append(error)
+                            elif any(kw in error_lower for kw in ["parameter", "argument", "key", "iv", "nonce"]):
+                                file_result["error_categories"]["parameter_error"].append(error)
+                            elif any(kw in error_lower for kw in ["algorithm", "detect", "unsupported"]):
+                                file_result["error_categories"]["algorithm_error"].append(error)
+                            elif any(kw in error_lower for kw in ["decrypt", "process", "stream", "buffer"]):
+                                file_result["error_categories"]["decryption_error"].append(error)
+                            elif any(kw in error_lower for kw in ["validation", "verify", "entropy"]):
+                                file_result["error_categories"]["validation_error"].append(error)
+                            else:
+                                file_result["error_categories"]["system_error"].append(error)
+                
                 except Exception as e:
-                    return {
-                        "input": file_path,
-                        "output": output_path,
-                        "success": False,
-                        "error": f"Unexpected error in decrypt_file: {e}",
-                        "errors": [f"Unexpected error in decrypt_file: {e}"]
-                    }
+                    error_msg = f"Unexpected error in decrypt_file: {e}"
+                    file_result["errors"].append(error_msg)
+                    file_result["error_categories"]["system_error"].append(error_msg)
+                    file_result["error"] = error_msg
+                    return file_result
+                
+                # Set partial success flag if needed
+                if not file_result.get("success", False) and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    file_result["partial_success"] = True
+                    if not file_result.get("error"):
+                        file_result["error"] = "Decryption produced output but validation failed"
                 
                 # If successful, learn from this for future files
                 if adaptive_params and result.get("success", False):
@@ -2417,101 +2725,159 @@ class StreamingDecryptionEngine:
                                  "nonce_size", "block_size"]:
                             if k in result:
                                 params_to_save[k] = result[k]
+                            elif k in file_kwargs:
+                                params_to_save[k] = file_kwargs[k]
                         
                         # Store the successful algorithm and parameters for this extension
                         successful_params[file_ext] = (
                             result.get("algorithm", ""),
                             params_to_save
                         )
+                        
+                        # Record that we learned from this file
+                        file_result["provided_adaptive_learning"] = True
                     except Exception as e:
-                        logger.warning(f"Error saving adaptive parameters for {file_path}: {e}")
-                        # Continue without saving adaptive params
+                        warning = f"Error saving adaptive parameters: {e}"
+                        file_result["warnings"].append(warning)
+                        logger.warning(f"{warning} for {file_path}")
                 
                 # Track algorithm success
                 try:
                     algorithm = result.get("algorithm", "unknown")
-                    if algorithm not in results["detected_algorithms"]:
-                        results["detected_algorithms"][algorithm] = 0
-                    results["detected_algorithms"][algorithm] += 1
+                    # Update global results dictionary for algorithm statistics
+                    with algorithm_stats_lock:  # Use lock for thread safety
+                        if algorithm not in results["detected_algorithms"]:
+                            results["detected_algorithms"][algorithm] = 0
+                        results["detected_algorithms"][algorithm] += 1
+                        
+                        if algorithm not in results["algorithm_success_rate"]:
+                            results["algorithm_success_rate"][algorithm] = {"attempts": 0, "successes": 0}
+                        results["algorithm_success_rate"][algorithm]["attempts"] += 1
+                        if result.get("success", False):
+                            results["algorithm_success_rate"][algorithm]["successes"] += 1
                     
-                    if algorithm not in results["algorithm_success_rate"]:
-                        results["algorithm_success_rate"][algorithm] = {"attempts": 0, "successes": 0}
-                    results["algorithm_success_rate"][algorithm]["attempts"] += 1
-                    if result.get("success", False):
-                        results["algorithm_success_rate"][algorithm]["successes"] += 1
+                    # Record algorithm in the file result
+                    file_result["algorithm"] = algorithm
                 except Exception as e:
-                    logger.warning(f"Error tracking algorithm statistics: {e}")
-                    # Continue without updating stats
+                    warning = f"Error tracking algorithm statistics: {e}"
+                    file_result["warnings"].append(warning)
+                    logger.warning(warning)
                 
-                # Create file result
-                file_result = {
-                    "input": file_path,
-                    "output": output_path,
-                    "success": result.get("success", False),
-                    "error": result.get("error"),
-                    "algorithm": result.get("algorithm", "unknown")
-                }
+                # Add additional metadata
+                file_result["processing_time_ms"] = int((time.time() - start_time) * 1000)
                 
-                # Add errors if present
-                if "errors" in result and result["errors"]:
-                    file_result["errors"] = result["errors"]
+                # Check for fatal error categories
+                fatal_error_categories = ["file_access", "output_error"]
+                has_fatal_error = any(len(file_result["error_categories"][cat]) > 0 for cat in fatal_error_categories)
+                file_result["has_fatal_error"] = has_fatal_error
                 
-                # Add adaptive info if relevant
-                if "using_adaptive_params" in file_kwargs:
-                    file_result["used_adaptive_params"] = True
-                
-                # Add algorithm retry info if relevant
-                if result.get("algorithm_retry", False):
-                    file_result["algorithm_retry"] = True
+                # Collect additional metrics if successful
+                if file_result.get("success", False):
+                    try:
+                        decrypted_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                        file_result["decrypted_size"] = decrypted_size
+                        if file_result["file_size"] > 0:
+                            file_result["size_ratio"] = decrypted_size / file_result["file_size"]
+                    except Exception as e:
+                        file_result["warnings"].append(f"Error collecting output metrics: {e}")
                 
                 return file_result
                 
             except Exception as e:
                 # Catch-all for any unexpected errors in the processing function
-                return {
-                    "input": file_path,
-                    "success": False,
-                    "error": f"Unexpected error processing file: {e}",
-                    "errors": [f"Unexpected error processing file: {e}"]
-                }
+                error_msg = f"Unexpected error processing file: {e}"
+                file_result["errors"].append(error_msg)
+                file_result["error_categories"]["system_error"].append(error_msg)
+                file_result["error"] = error_msg
+                file_result["processing_time_ms"] = int((time.time() - start_time) * 1000)
+                return file_result
         
         # Choose between parallel and sequential processing
-        if parallel and len(file_list) > 1:
-            # Use ThreadPoolExecutor for parallel processing
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all tasks
-                future_to_file = {executor.submit(process_file, file_path): file_path 
-                                 for file_path in file_list}
-                
-                # Process results as they complete
-                for future in concurrent.futures.as_completed(future_to_file):
-                    file_result = future.result()
+        try:
+            if parallel and len(active_files) > 1:
+                # Use ThreadPoolExecutor for parallel processing
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all tasks
+                    future_to_file = {executor.submit(process_file, file_path): file_path 
+                                    for file_path in active_files}
+                    
+                    # Process results as they complete
+                    for future in concurrent.futures.as_completed(future_to_file):
+                        try:
+                            file_result = future.result()
+                            
+                            # Update statistics with thread safety
+                            with algorithm_stats_lock:
+                                if file_result.get("success", False):
+                                    results["successful"] += 1
+                                elif file_result.get("partial_success", False):
+                                    results["partial"] += 1
+                                else:
+                                    results["failed"] += 1
+                                
+                                # Count error categories
+                                for category, errors in file_result.get("error_categories", {}).items():
+                                    if category in results["error_categories"] and errors:
+                                        results["error_categories"][category] += len(errors)
+                                
+                                # Collect high-level errors
+                                if "error" in file_result and file_result["error"]:
+                                    if file_result["error"] not in results["errors"]:
+                                        results["errors"].append(file_result["error"])
+                                
+                                # Collect warnings
+                                for warning in file_result.get("warnings", []):
+                                    if warning not in results["warnings"]:
+                                        results["warnings"].append(warning)
+                                
+                                # Add to results
+                                results["files"].append(file_result)
+                        except Exception as e:
+                            # Handle failures in future completion
+                            logger.error(f"Error processing future result: {e}")
+                            results["failed"] += 1
+                            results["errors"].append(f"Error processing batch task: {e}")
+            else:
+                # Sequential processing
+                for file_path in active_files:
+                    file_result = process_file(file_path)
                     
                     # Update statistics
-                    if file_result["success"]:
+                    if file_result.get("success", False):
                         results["successful"] += 1
-                    elif file_result.get("partial", False):
+                    elif file_result.get("partial_success", False):
                         results["partial"] += 1
                     else:
                         results["failed"] += 1
                     
+                    # Count error categories
+                    for category, errors in file_result.get("error_categories", {}).items():
+                        if category in results["error_categories"] and errors:
+                            results["error_categories"][category] += len(errors)
+                    
+                    # Collect high-level errors
+                    if "error" in file_result and file_result["error"]:
+                        if file_result["error"] not in results["errors"]:
+                            results["errors"].append(file_result["error"])
+                    
+                    # Collect warnings
+                    for warning in file_result.get("warnings", []):
+                        if warning not in results["warnings"]:
+                            results["warnings"].append(warning)
+                    
                     # Add to results
                     results["files"].append(file_result)
-        else:
-            # Sequential processing
-            for file_path in file_list:
-                file_result = process_file(file_path)
-                
-                # Update statistics
-                if file_result["success"]:
-                    results["successful"] += 1
-                elif file_result.get("partial", False):
-                    results["partial"] += 1
-                else:
-                    results["failed"] += 1
-                
-                # Add to results
-                results["files"].append(file_result)
+                    
+                    # Check if we should continue after errors
+                    if not continue_on_error and file_result.get("has_fatal_error", False):
+                        results["errors"].append("Processing stopped due to fatal error")
+                        break
+        except Exception as e:
+            # Handle any unexpected errors in the batch processing logic
+            error_msg = f"Unexpected error during batch processing: {e}"
+            logger.error(error_msg, exc_info=True)
+            results["errors"].append(error_msg)
+            results["success"] = False
         
         # Calculate algorithm success rates
         for algo, stats in results["algorithm_success_rate"].items():
@@ -2520,7 +2886,12 @@ class StreamingDecryptionEngine:
             else:
                 stats["rate"] = 0.0
         
-        # Add batch summary
+        # Add batch summary and metadata
+        results["end_time"] = time.time()
+        results["processing_time_ms"] = int((results["end_time"] - results["start_time"]) * 1000)
+        results["success"] = results["successful"] > 0 and results["failed"] == 0
+        
+        # Check if any files were successfully decrypted
         results["summary"] = {
             "best_algorithm": max(
                 results["algorithm_success_rate"].items(), 
@@ -2529,8 +2900,27 @@ class StreamingDecryptionEngine:
             "adapted_parameters": bool(successful_params),
             "used_auto_detect": auto_detect,
             "used_retry": retry_algorithms,
-            "used_parallel": parallel
+            "used_parallel": parallel,
+            "continue_on_error": continue_on_error,
+            "processed_files": len(results["files"]),
+            "processed_size_bytes": sum(f.get("file_size", 0) for f in results["files"]),
+            "decrypted_size_bytes": sum(f.get("decrypted_size", 0) for f in results["files"] if f.get("success", False)),
+            "avg_processing_time_ms": int(sum(f.get("processing_time_ms", 0) for f in results["files"]) / len(results["files"])) if results["files"] else 0
         }
+        
+        # Calculate success percentages
+        if results["total"] > 0:
+            results["success_rate"] = results["successful"] / results["total"]
+            results["partial_rate"] = results["partial"] / results["total"]
+            results["failure_rate"] = results["failed"] / results["total"]
+        
+        # Add error summary
+        if len(results["errors"]) > 5:
+            # If there are many errors, summarize the most common ones
+            from collections import Counter
+            error_counts = Counter(results["errors"])
+            most_common_errors = error_counts.most_common(5)
+            results["most_common_errors"] = [{"error": e, "count": c} for e, c in most_common_errors]
         
         return results
     
