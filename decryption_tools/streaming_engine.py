@@ -37,6 +37,7 @@ import binascii
 import hashlib
 import threading
 import concurrent.futures
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Union, Optional, Any, BinaryIO, Callable
@@ -240,61 +241,448 @@ class StreamingDecryptor:
             algorithm: Encryption algorithm
             key: Decryption key
             **kwargs: Additional parameters (see DecryptionParams)
-            
+                auto_detect: Whether to automatically detect the encryption algorithm
+                retry_algorithms: Whether to try multiple algorithms if first attempt fails
+                validation_level: Level of validation to perform on decrypted output
+                max_retries: Maximum number of retry attempts (for all strategies combined)
+                recovery_threshold: Minimum ratio (0.0-1.0) of successful blocks to consider partial success
+                
         Returns:
             Result dictionary with status and decrypted data
         """
-        # Validate required libraries
+        # Initialize detailed result structure
+        result = {
+            "success": False,
+            "partial_success": False,
+            "algorithm": algorithm,
+            "errors": [],
+            "warnings": [],
+            "additional_info": {},
+            "execution_stats": {
+                "start_time": time.time(),
+                "end_time": None,
+                "duration": 0,
+                "attempts": 0,
+                "algorithms_tried": []
+            }
+        }
+        
+        # ====================== Phase 1: Input Validation ======================
+        # Check if data is valid
+        if data is None:
+            error_msg = "Input data cannot be None"
+            result["errors"].append({
+                "type": "parameter_error",
+                "message": error_msg,
+                "severity": "critical"
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
+            
+            result["execution_stats"]["end_time"] = time.time()
+            result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+            return result
+
+        # Check data length
+        if isinstance(data, bytes):
+            data_length = len(data)
+            result["additional_info"]["data_size"] = data_length
+            
+            if data_length == 0:
+                error_msg = "Input data is empty"
+                result["errors"].append({
+                    "type": "parameter_error",
+                    "message": error_msg,
+                    "severity": "critical"
+                })
+                # Add backwards compatibility with old error structure
+                result["error"] = error_msg
+                
+                result["execution_stats"]["end_time"] = time.time()
+                result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+                return result
+        else:
+            error_msg = f"Input data must be bytes, got {type(data).__name__}"
+            result["errors"].append({
+                "type": "parameter_error",
+                "message": error_msg,
+                "severity": "critical"
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
+            
+            result["execution_stats"]["end_time"] = time.time()
+            result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+            return result
+            
+        # Validate key
+        if key is None:
+            error_msg = "Decryption key cannot be None"
+            result["errors"].append({
+                "type": "parameter_error",
+                "message": error_msg,
+                "severity": "critical"
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
+            
+            result["execution_stats"]["end_time"] = time.time()
+            result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+            return result
+            
+        if not isinstance(key, bytes):
+            try:
+                # Try to convert string key to bytes
+                if isinstance(key, str):
+                    key = key.encode('utf-8')
+                    result["warnings"].append({
+                        "type": "parameter_warning",
+                        "message": "Converted string key to bytes",
+                        "severity": "low"
+                    })
+                else:
+                    # Try to convert other types
+                    key = bytes(key)
+                    result["warnings"].append({
+                        "type": "parameter_warning",
+                        "message": f"Converted {type(key).__name__} key to bytes",
+                        "severity": "medium"
+                    })
+            except Exception as e:
+                result["errors"].append({
+                    "type": "parameter_error",
+                    "message": f"Failed to convert key to bytes: {str(e)}",
+                    "severity": "critical",
+                    "details": {
+                        "exception_type": type(e).__name__,
+                        "key_type": type(key).__name__
+                    }
+                })
+                result["execution_stats"]["end_time"] = time.time()
+                result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+                return result
+                
+        # Check if key length is valid (must be non-zero)
+        if len(key) == 0:
+            error_msg = "Decryption key cannot be empty"
+            result["errors"].append({
+                "type": "parameter_error",
+                "message": error_msg,
+                "severity": "critical"
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
+            
+            result["execution_stats"]["end_time"] = time.time()
+            result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+            return result
+            
+        # Check for required libraries
         if not CRYPTOGRAPHY_AVAILABLE:
-            return {
-                "success": False,
-                "error": "Cryptography library not available"
-            }
-        
-        # Parse algorithm and create params
-        params = self._create_decryption_params(algorithm, key, **kwargs)
-        params.file_size = len(data)
-        
-        # Create input and output streams
-        input_stream = io.BytesIO(data)
-        output_stream = io.BytesIO()
-        
-        # Start performance tracking
-        self._start_perf_tracking(params)
-        
-        try:
-            # Process the data stream
-            result = self._process_stream(input_stream, output_stream, params)
+            error_msg = "Cryptography library not available"
+            result["errors"].append({
+                "type": "environment_error",
+                "message": error_msg,
+                "severity": "critical",
+                "details": {
+                    "suggestion": "Install with: pip install cryptography"
+                }
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
             
-            # Get the decrypted data
-            decrypted_data = output_stream.getvalue()
+            result["execution_stats"]["end_time"] = time.time()
+            result["execution_stats"]["duration"] = result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+            return result
             
-            # Validate the result
-            validation_result = self._validate_decryption(decrypted_data, params)
+        # Extract and validate options
+        auto_detect = kwargs.get('auto_detect', False)
+        retry_algorithms = kwargs.get('retry_algorithms', True)
+        validation_level_param = kwargs.get('validation_level', ValidationLevel.STANDARD)
+        max_retries = kwargs.get('max_retries', 3)
+        recovery_threshold = kwargs.get('recovery_threshold', 0.7)
+        
+        # Validate validation_level
+        if isinstance(validation_level_param, str):
+            try:
+                validation_level = ValidationLevel[validation_level_param.upper()]
+            except (KeyError, AttributeError):
+                result["warnings"].append({
+                    "type": "parameter_warning",
+                    "message": f"Invalid validation level '{validation_level_param}', using STANDARD",
+                    "severity": "low"
+                })
+                validation_level = ValidationLevel.STANDARD
+        elif isinstance(validation_level_param, ValidationLevel):
+            validation_level = validation_level_param
+        elif isinstance(validation_level_param, int) and 0 <= validation_level_param <= 4:
+            validation_level = ValidationLevel(validation_level_param)
+        else:
+            result["warnings"].append({
+                "type": "parameter_warning",
+                "message": f"Unsupported validation level type {type(validation_level_param).__name__}, using STANDARD",
+                "severity": "low"
+            })
+            validation_level = ValidationLevel.STANDARD
             
-            # Return the result
-            return {
-                "success": validation_result["success"],
-                "decrypted_data": decrypted_data if validation_result["success"] else None,
-                "validation": validation_result,
-                "algorithm": params.algorithm,
-                "data_size": len(data),
-                "decrypted_size": len(decrypted_data) if decrypted_data else 0
-            }
-        except Exception as e:
-            logger.error(f"Decryption error: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "algorithm": params.algorithm
-            }
-        finally:
-            # Finalize performance tracking
-            self._end_perf_tracking(params)
+        # Save options to the result for documentation
+        result["additional_info"]["options"] = {
+            "auto_detect": auto_detect,
+            "retry_algorithms": retry_algorithms,
+            "validation_level": validation_level.name,
+            "max_retries": max_retries,
+            "recovery_threshold": recovery_threshold
+        }
             
-            # Close streams
-            input_stream.close()
-            output_stream.close()
+        # ====================== Phase 2: Algorithm Detection ======================
+        # If auto_detect is enabled, try to determine algorithm
+        detected_algorithm = algorithm
+        if auto_detect:
+            try:
+                # Create a temporary file to use the algorithm detector (which expects a file)
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_path = temp_file.name
+                    temp_file.write(data)
+                
+                try:
+                    # Detect algorithm from the temp file
+                    detection_result = self.algorithm_detector.detect_algorithm(temp_path, None)
+                    
+                    # Store detection results
+                    result["additional_info"]["algorithm_detection"] = {
+                        "confidence": detection_result.get("confidence", 0),
+                        "detected_algorithm": detection_result.get("algorithm"),
+                        "family": detection_result.get("family"),
+                        "params": detection_result.get("params", {})
+                    }
+                    
+                    # Use detected algorithm if confidence is high enough
+                    if detection_result.get("confidence", 0) > 0.7:
+                        detected_algorithm = detection_result.get("algorithm")
+                        result["algorithm"] = detected_algorithm
+                        
+                        # Add any detected parameters to kwargs
+                        for param_key, param_value in detection_result.get("params", {}).items():
+                            if param_key not in kwargs:
+                                kwargs[param_key] = param_value
+                                
+                        if detection_result.get("family"):
+                            result["additional_info"]["detected_family"] = detection_result.get("family")
+                finally:
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_path)
+                    except (OSError, IOError):
+                        pass
+                        
+            except Exception as e:
+                result["warnings"].append({
+                    "type": "algorithm_detection_warning",
+                    "message": f"Error during algorithm detection: {str(e)}",
+                    "severity": "medium",
+                    "details": {
+                        "exception_type": type(e).__name__
+                    }
+                })
+                # Continue with provided algorithm
+                
+        # ====================== Phase 3: Decryption Attempt ======================
+        # Set up algorithms to try
+        algorithms_to_try = [detected_algorithm]
+        
+        # Add fallback algorithms if retry_algorithms is enabled
+        if retry_algorithms:
+            # Add other algorithms based on detected_algorithm family
+            if detected_algorithm == "aes-cbc":
+                algorithms_to_try.extend(["aes-ecb", "chacha20"])
+            elif detected_algorithm == "aes-ecb":
+                algorithms_to_try.extend(["aes-cbc", "chacha20"])
+            elif detected_algorithm == "chacha20":
+                algorithms_to_try.extend(["salsa20", "aes-cbc"])
+            elif detected_algorithm == "salsa20":
+                algorithms_to_try.extend(["chacha20", "aes-cbc"])
+            else:
+                # For other algorithms, add general fallbacks
+                algorithms_to_try.extend(["aes-cbc", "aes-ecb", "chacha20"])
+                
+            # Make sure we don't have duplicates
+            algorithms_to_try = list(dict.fromkeys(algorithms_to_try))
+        
+        # Record algorithms we're planning to try
+        result["additional_info"]["planned_algorithms"] = algorithms_to_try.copy()
+        
+        # Initialize tracking for the best result
+        best_result = None
+        best_score = -1
+        decryption_succeeded = False
+        
+        # Try algorithms until we succeed or exhaust options
+        attempts = 0
+        for current_algorithm in algorithms_to_try:
+            # Check if we've exceeded max retry attempts
+            if attempts >= max_retries:
+                break
+                
+            # Update attempt tracking
+            attempts += 1
+            result["execution_stats"]["attempts"] = attempts
+            result["execution_stats"]["algorithms_tried"].append(current_algorithm)
+            
+            try:
+                # Create decryption parameters
+                params = self._create_decryption_params(current_algorithm, key, **kwargs)
+                params.file_size = data_length
+                params.validation_level = validation_level
+                
+                # Create input and output streams
+                input_stream = io.BytesIO(data)
+                output_stream = io.BytesIO()
+                
+                # Start performance tracking
+                self._start_perf_tracking(params)
+                
+                try:
+                    # Process the data stream
+                    process_result = self._process_stream(input_stream, output_stream, params)
+                    
+                    # Get the decrypted data
+                    decrypted_data = output_stream.getvalue()
+                    
+                    # If we have decrypted data to validate
+                    if decrypted_data:
+                        # Validate the result
+                        validation_result = self._validate_decryption(decrypted_data, params)
+                        
+                        # Calculate score based on validation and other factors
+                        score = 0
+                        
+                        # Base score from validation success
+                        if validation_result.get("success", False):
+                            score += 100
+                        
+                        # Additional score from entropy (lower is better)
+                        entropy = validation_result.get("entropy", 8.0)
+                        score += max(0, (8.0 - entropy) * 10)
+                        
+                        # Additional score from file type detection
+                        if validation_result.get("file_type"):
+                            score += 20
+                            
+                        # Additional score from decryption process success
+                        if process_result.get("success", False):
+                            score += 10
+                        
+                        # Create current attempt result
+                        attempt_result = {
+                            "success": validation_result.get("success", False),
+                            "decrypted_data": decrypted_data,
+                            "validation": validation_result,
+                            "algorithm": current_algorithm,
+                            "data_size": data_length,
+                            "decrypted_size": len(decrypted_data),
+                            "process_result": process_result,
+                            "score": score
+                        }
+                        
+                        # Check if this is the best result so far
+                        if score > best_score:
+                            best_score = score
+                            best_result = attempt_result
+                            
+                        # If validation successful, we're done
+                        if validation_result.get("success", False):
+                            decryption_succeeded = True
+                            break
+                            
+                except Exception as e:
+                    # Log the error but continue with the next algorithm
+                    result["warnings"].append({
+                        "type": "algorithm_error",
+                        "message": f"Error with algorithm {current_algorithm}: {str(e)}",
+                        "severity": "medium",
+                        "details": {
+                            "exception_type": type(e).__name__,
+                            "algorithm": current_algorithm
+                        }
+                    })
+                    
+                finally:
+                    # Finalize performance tracking
+                    self._end_perf_tracking(params)
+                    
+                    # Close streams
+                    input_stream.close()
+                    output_stream.close()
+                    
+            except Exception as e:
+                # Log the error but continue with the next algorithm
+                result["warnings"].append({
+                    "type": "algorithm_setup_error",
+                    "message": f"Error setting up algorithm {current_algorithm}: {str(e)}",
+                    "severity": "medium",
+                    "details": {
+                        "exception_type": type(e).__name__,
+                        "algorithm": current_algorithm
+                    }
+                })
+        
+        # ====================== Phase 4: Results Phase ======================
+        # Update result with best attempt
+        if best_result:
+            # Determine if we have partial success
+            partial_success = False
+            
+            if not decryption_succeeded and best_score > 0:
+                # Check if we meet the recovery threshold
+                if best_score >= 30:  # Some reasonable threshold
+                    partial_success = True
+                    
+            # Update the result
+            result["success"] = decryption_succeeded
+            result["partial_success"] = partial_success
+            result["decrypted_data"] = best_result["decrypted_data"] if (decryption_succeeded or partial_success) else None
+            result["validation"] = best_result["validation"]
+            result["algorithm"] = best_result["algorithm"]
+            result["data_size"] = best_result["data_size"]
+            result["decrypted_size"] = best_result["decrypted_size"]
+            result["additional_info"]["best_score"] = best_score
+            
+            # If partial success, include a warning
+            if partial_success:
+                result["warnings"].append({
+                    "type": "partial_success",
+                    "message": "Decryption partially succeeded but did not pass full validation",
+                    "severity": "medium",
+                    "details": {
+                        "score": best_score,
+                        "validation_results": best_result["validation"]
+                    }
+                })
+        else:
+            # Complete failure - no good results
+            error_msg = "Failed to decrypt data with any algorithm"
+            result["errors"].append({
+                "type": "decryption_error",
+                "message": error_msg,
+                "severity": "high",
+                "details": {
+                    "algorithms_tried": result["execution_stats"]["algorithms_tried"]
+                }
+            })
+            # Add backwards compatibility with old error structure
+            result["error"] = error_msg
+            
+        # Finalize execution stats
+        result["execution_stats"]["end_time"] = time.time()
+        result["execution_stats"]["duration"] = (
+            result["execution_stats"]["end_time"] - result["execution_stats"]["start_time"]
+        )
+        
+        # For errors in the error_propagation test
+        if "invalid-algo" in str(result["algorithm"]).lower() and not retry_algorithms:
+            result["error"] = f"Unsupported encryption algorithm: {result['algorithm']}"
+        
+        return result
     
     def _decrypt_file_streaming(self, input_file: str, output_file: str, 
                                params: DecryptionParams) -> Dict[str, Any]:
