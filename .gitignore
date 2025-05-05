@@ -1,8 +1,9 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -19,45 +20,72 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Virtual Environment
-venv/
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+batch_coverage_data.json
+batch_coverage_improved_data.json
+batch_coverage_improved_report.json
+batch_coverage_report.json
+combined_coverage.json
+combined_coverage_report.json
+test_coverage_report.json
+encryption_analyzer_coverage.json
+network_coverage.json
+yara_coverage.json
+forced_module_coverage.json
+
+# Environments
+.env
+.venv
 env/
+venv/
 ENV/
+env.bak/
+venv.bak/
 
-# IDE specific files
-.idea/
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
 .vscode/
+
+# PyCharm
+.idea/
+
+# Editor backup files
+*~
+*.bak
 *.swp
-*.swo
+
+# OS specific files
 .DS_Store
+Thumbs.db
+
+# Log files
+*.log
+*.tmp
 
 # Project specific
-*.log
-logs/
 samples/
-output/
-*.dmp
-*.raw
-*.pcap
-*.exe
-*.dll
-*.bin
-*.dat
-*.dump
-*restorebackup
+MagicMock/
+llm_cache/
+.githooks/
+.github/
+restorebackup_analysis_*/
+lockbit_recovery_output/
 
-# Sensitive/private information
-*.key
-*.pem
-config.json
-*.config
-.env
-
-# Docker
-.dockerignore
-Dockerfile.dev
-
-# Documentation builds
-docs/_build/
-site/
+# Temporary or intermediate files
+*.tmp
+*.temp
+*.out
