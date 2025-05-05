@@ -69,6 +69,106 @@ innora-defender/
 
 ## Usage
 
+### Universal Streaming Engine
+
+Our high-performance streaming engine with enhanced error handling provides efficient file decryption:
+
+```python
+from decryption_tools.streaming_engine import StreamingDecryptor
+
+# Initialize the streaming decryptor
+decryptor = StreamingDecryptor()
+
+# Decrypt a single file
+result = decryptor.decrypt_file(
+    input_file="path/to/encrypted_file",
+    output_file="path/to/decrypted_file",
+    algorithm="aes-cbc",
+    key=key_bytes,
+    iv=iv_bytes,
+    header_size=16  # Optional: skip header bytes
+)
+
+if result["success"]:
+    print("File successfully decrypted")
+else:
+    print(f"Decryption failed: {result.get('error')}")
+
+# Batch decrypt multiple files with enhanced parallel processing
+file_mappings = [
+    {"input": "file1.enc", "output": "file1.dec"},
+    {"input": "file2.enc", "output": "file2.dec"},
+    {"input": "file3.enc", "output": "file3.dec"}
+]
+
+# Define a progress callback for real-time updates
+def progress_callback(stats):
+    print(f"Progress: {stats['current_progress']*100:.1f}% | "
+          f"Completed: {stats['completed_files']}/{stats['total_files']} | "
+          f"Success: {stats['successful_files']} | Errors: {stats['failed_files']}")
+
+batch_result = decryptor.batch_decrypt(
+    file_mappings=file_mappings,
+    algorithm="aes-cbc",
+    key=key_bytes,
+    batch_params={
+        "parallel_execution": True,        # Enable parallel processing
+        "max_workers": 8,                  # Number of worker threads
+        "auto_detect_algorithm": True,     # Try to detect algorithm if specified one fails
+        "retry_count": 3,                  # Retry failed files
+        "include_error_patterns": True,    # Analyze error patterns
+        "progress_callback": progress_callback,  # Real-time progress updates
+        "save_summary": True,
+        "summary_file": "batch_summary.json"
+    }
+)
+
+print(f"Processed {batch_result['total_files']} files")
+print(f"Successfully decrypted: {batch_result['successful_files']}")
+print(f"Failed to decrypt: {batch_result['failed_files']}")
+
+# Access error patterns for insights
+if "error_patterns" in batch_result and batch_result["error_patterns"]:
+    print("\nError Patterns Detected:")
+    for pattern, details in batch_result["error_patterns"].items():
+        print(f"- {pattern}: {details['count']} files")
+        if "recommendation" in details:
+            print(f"  Recommendation: {details['recommendation']}")
+```
+
+### Command-Line Batch Decryption
+
+The enhanced batch decryption tool provides a powerful command-line interface with real-time progress visualization and comprehensive error reporting:
+
+```bash
+# Process all encrypted files in a directory
+./batch_decrypt.py --input-dir /path/to/encrypted/files --output-dir /path/to/output --algorithm aes-cbc --key 0123456789abcdef
+
+# Auto-detect algorithm with parallel processing (8 threads)
+./batch_decrypt.py --input-dir /path/to/encrypted/files --output-dir /path/to/output \
+    --auto-detect --parallel --threads 8 --key-file /path/to/key.bin
+
+# Process files from a list with detailed summary and error pattern analysis
+./batch_decrypt.py --file-list files.txt --algorithm aes-cbc --key-file key.bin \
+    --summary-file report.json --max-retries 3
+
+# Process only files with specific extensions
+./batch_decrypt.py --input-dir /path/to/encrypted/files --output-dir /path/to/output \
+    --algorithm xor --key DEADBEEF --extensions .enc,.locked,.crypted
+
+# Advanced decryption with initialization vector in file
+./batch_decrypt.py --input-dir /path/to/encrypted/files --output-dir /path/to/output \
+    --algorithm aes-cbc --key-file key.bin --iv-in-file --iv-offset 16 --iv-size 16 --header-size 32
+```
+
+The tool provides real-time progress visualization:
+
+```
+[█████████████████████████████████-----------] 75.0% | 15/20 files | ✓ 13 | ✗ 2
+```
+
+And generates comprehensive summary reports with error pattern analysis and recommendations.
+
 ### LockBit Decryption
 
 ```python
@@ -156,6 +256,10 @@ print(f"Potential keys: {len(results['potential_keys'])}")
 For detailed documentation, see the `docs/` directory:
 
 ### Decryption Documentation
+- [Universal Streaming Engine Batch Processing](docs/UNIVERSAL_STREAMING_ENGINE_BATCH_PROCESSING.md) - Advanced batch decryption capabilities
+- [Enhanced Error Pattern Detection](docs/ENHANCED_ERROR_PATTERN_DETECTION.md) - AI-powered error analysis and recommendation system
+- [Streaming Engine Error Handling](tests/SUMMARY_OF_ERROR_HANDLING_IMPROVEMENTS_UPDATED.md) - Comprehensive error handling improvements
+- [Batch Processing Summary](tests/STREAMING_ENGINE_BATCH_PROCESSING_SUMMARY.md) - Summary of batch processing enhancements
 - [LockBit Decryption Optimization](docs/LOCKBIT_DECRYPTION_OPTIMIZATION.md) - Details on our industry-leading LockBit recovery
 - [Enhanced Decryption Capabilities Plan](docs/DECRYPTION_CAPABILITIES_PLAN.md) - Roadmap for multi-family decryption support
 - [Future Development Plan](docs/FUTURE_DEVELOPMENT_PLAN_UPDATED.md) - Updated plan focusing on decryption capabilities
@@ -178,6 +282,8 @@ We maintain strict quality standards for our code, especially for security-criti
 - **Security-Critical Modules**: Minimum 95% test coverage
   - ✅ YARA Enhanced Generator: 95% coverage
   - ✅ LockBit Optimized Recovery: 96% coverage
+  - ✅ No More Ransom Integration: 95% coverage
+  - ✅ Universal Streaming Engine Batch Processing: 95% coverage
   - ⚠️ YARA Integration: 87% coverage (in progress)
   - ⚠️ YARA CLI: 78% coverage (in progress)
 - **Core Components**: Minimum 90% test coverage
@@ -192,13 +298,39 @@ python tests/run_all_tests.py
 # Run YARA tests with coverage measurement
 python tests/run_yara_tests.py
 
+# Run No More Ransom tests with custom tracer
+tests/run_nomoreransom_tests.sh --coverage --report
+
+# Test specific modules with different testing modes
+tests/run_nomoreransom_tests.sh --mode comprehensive
+tests/run_nomoreransom_tests.sh --mode integration
+
 # Run enhanced tests for specific modules
 python tests/run_enhanced_tests.py --module lockbit
 python tests/run_enhanced_tests.py --module yara
+python tests/measure_streaming_engine_coverage.py
+
+# Test batch processing functionality
+python -m tests.test_batch_decrypt_cli
+python -m tests.test_streaming_engine_batch_processing
 
 # Verify coverage for security-critical modules
 tests/check_security_coverage.sh
 ```
+
+### Advanced Testing Framework
+
+We've implemented an advanced testing framework for complex modules with platform-specific behavior, which includes:
+
+1. **Custom Code Execution Tracing** - Tracks execution of code paths that standard coverage tools miss
+2. **Multi-Platform Testing** - Tests platform-specific code via environment simulation
+3. **Edge Case Detection** - Specialized tests for boundary conditions and error handling
+4. **Comprehensive Reporting** - Detailed coverage analysis with both standard and custom metrics
+
+For more details on our advanced testing approach, see:
+- [No More Ransom Testing Guide](tests/NOMORERANSOM_TESTING_README.md)
+- [Direct NoMoreRansom Executor Coverage](tests/DIRECT_NOMORERANSOM_EXECUTOR_COVERAGE.md)
+- [No More Ransom Coverage Summary](tests/NOMORERANSOM_COVERAGE_SUMMARY.md)
 
 ### Test Coverage Visualization
 

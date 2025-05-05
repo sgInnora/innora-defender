@@ -140,6 +140,829 @@ class DecryptionParams:
     error_message: Optional[str] = None        # Error message if decryption failed
     
 
+class BatchProcessingResult:
+    """
+    Result object for batch processing operations
+    """
+    
+    def __init__(self, total_files: int = 0):
+        """
+        Initialize batch processing result
+        
+        Args:
+            total_files: Total number of files to process
+        """
+        self.start_time = time.time()
+        self.end_time = None
+        self.duration = 0
+        
+        self.total_files = total_files
+        self.successful_files = 0
+        self.failed_files = 0
+        self.partial_success_files = 0
+        
+        self.file_results = []
+        self.error_summary = {}
+        self.warnings_summary = {}
+        
+        # Performance stats
+        self.total_bytes_processed = 0
+        self.avg_throughput_bps = 0
+        self.max_throughput_bps = 0
+        self.min_throughput_bps = float('inf')
+        
+        # Thread stats
+        self.max_concurrent_threads = 0
+        self.completion_times = []
+        
+        # Enhanced error analysis
+        self.enhanced_error_analysis = None
+        
+    def add_file_result(self, file_result: Dict[str, Any]) -> None:
+        """
+        Add a file processing result to the batch
+        
+        Args:
+            file_result: Result dictionary from processing a single file
+        """
+        self.file_results.append(file_result)
+        
+        # Update counters
+        if file_result.get("success", False):
+            self.successful_files += 1
+        elif file_result.get("partial_success", False):
+            self.partial_success_files += 1
+        else:
+            self.failed_files += 1
+            
+        # Update bytes processed
+        if "bytes_processed" in file_result:
+            self.total_bytes_processed += file_result["bytes_processed"]
+            
+        # Update throughput stats
+        if "throughput_bps" in file_result:
+            throughput = file_result["throughput_bps"]
+            self.max_throughput_bps = max(self.max_throughput_bps, throughput)
+            self.min_throughput_bps = min(self.min_throughput_bps, throughput)
+            
+        # Aggregate errors
+        self._aggregate_errors(file_result)
+        
+        # Aggregate warnings
+        self._aggregate_warnings(file_result)
+        
+        # Track completion time for timeline analysis
+        self.completion_times.append(time.time())
+        
+    def _aggregate_errors(self, file_result: Dict[str, Any]) -> None:
+        """
+        Aggregate errors from file result
+        
+        Args:
+            file_result: Result dictionary from processing a single file
+        """
+        # Handle old error format (string)
+        if "error" in file_result and isinstance(file_result["error"], str):
+            error_msg = file_result["error"]
+            if error_msg not in self.error_summary:
+                self.error_summary[error_msg] = {
+                    "count": 0,
+                    "files": []
+                }
+            self.error_summary[error_msg]["count"] += 1
+            self.error_summary[error_msg]["files"].append(file_result.get("input_file", "unknown"))
+            
+        # Handle new error format (list of dicts)
+        if "errors" in file_result and isinstance(file_result["errors"], list):
+            for error in file_result["errors"]:
+                error_type = error.get("type", "unknown_error")
+                error_msg = error.get("message", "Unknown error")
+                error_key = f"{error_type}: {error_msg}"
+                
+                if error_key not in self.error_summary:
+                    self.error_summary[error_key] = {
+                        "count": 0,
+                        "files": [],
+                        "severity": error.get("severity", "medium"),
+                        "type": error_type,
+                        "details": error.get("details", {})
+                    }
+                    
+                self.error_summary[error_key]["count"] += 1
+                self.error_summary[error_key]["files"].append(file_result.get("input_file", "unknown"))
+                
+    def _aggregate_warnings(self, file_result: Dict[str, Any]) -> None:
+        """
+        Aggregate warnings from file result
+        
+        Args:
+            file_result: Result dictionary from processing a single file
+        """
+        # Handle old warning format (string)
+        if "warning" in file_result and isinstance(file_result["warning"], str):
+            warning_msg = file_result["warning"]
+            if warning_msg not in self.warnings_summary:
+                self.warnings_summary[warning_msg] = {
+                    "count": 0,
+                    "files": []
+                }
+            self.warnings_summary[warning_msg]["count"] += 1
+            self.warnings_summary[warning_msg]["files"].append(file_result.get("input_file", "unknown"))
+            
+        # Handle new warning format (list of dicts)
+        if "warnings" in file_result and isinstance(file_result["warnings"], list):
+            for warning in file_result["warnings"]:
+                warning_type = warning.get("type", "unknown_warning")
+                warning_msg = warning.get("message", "Unknown warning")
+                warning_key = f"{warning_type}: {warning_msg}"
+                
+                if warning_key not in self.warnings_summary:
+                    self.warnings_summary[warning_key] = {
+                        "count": 0,
+                        "files": [],
+                        "severity": warning.get("severity", "low"),
+                        "type": warning_type,
+                        "details": warning.get("details", {})
+                    }
+                    
+                self.warnings_summary[warning_key]["count"] += 1
+                self.warnings_summary[warning_key]["files"].append(file_result.get("input_file", "unknown"))
+                
+    def finalize(self) -> None:
+        """Finalize the batch result and calculate summary metrics"""
+        self.end_time = time.time()
+        self.duration = self.end_time - self.start_time
+        
+        # Calculate average throughput
+        if self.duration > 0:
+            self.avg_throughput_bps = self.total_bytes_processed / self.duration
+            
+        # If no throughput was ever recorded, set min to 0
+        if self.min_throughput_bps == float('inf'):
+            self.min_throughput_bps = 0
+            
+    def get_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of batch processing
+        
+        Returns:
+            Dictionary with batch processing summary
+        """
+        # Ensure result is finalized
+        if self.end_time is None:
+            self.finalize()
+            
+        # Create summary dict
+        summary = {
+            "files": {
+                "total": self.total_files,
+                "successful": self.successful_files,
+                "failed": self.failed_files,
+                "partial_success": self.partial_success_files
+            },
+            "timing": {
+                "start_time": self.start_time,
+                "end_time": self.end_time,
+                "duration": self.duration,
+                "avg_file_time": self.duration / max(1, self.total_files)
+            },
+            "performance": {
+                "total_bytes_processed": self.total_bytes_processed,
+                "avg_throughput_bps": self.avg_throughput_bps,
+                "max_throughput_bps": self.max_throughput_bps,
+                "min_throughput_bps": self.min_throughput_bps
+            },
+            "errors": {
+                "summary": self.error_summary,
+                "total_errors": sum(err["count"] for err in self.error_summary.values()),
+                "unique_errors": len(self.error_summary)
+            },
+            "warnings": {
+                "summary": self.warnings_summary,
+                "total_warnings": sum(warn["count"] for warn in self.warnings_summary.values()),
+                "unique_warnings": len(self.warnings_summary)
+            },
+            "concurrency": {
+                "max_concurrent_threads": self.max_concurrent_threads
+            }
+        }
+        
+        # Add enhanced error analysis if available
+        if hasattr(self, 'enhanced_error_analysis') and self.enhanced_error_analysis:
+            summary["enhanced_error_analysis"] = self.enhanced_error_analysis
+        
+        return summary
+    
+    def get_error_patterns(self) -> Dict[str, Any]:
+        """
+        Analyze errors to find patterns across files
+        
+        Returns:
+            Dictionary with error patterns and insights
+        """
+        # Count files affected by each error type
+        error_types = {}
+        for error_key, error_info in self.error_summary.items():
+            error_type = error_info.get("type", "unknown_error")
+            if error_type not in error_types:
+                error_types[error_type] = {
+                    "count": 0,
+                    "files": set()
+                }
+            error_types[error_type]["count"] += error_info["count"]
+            error_types[error_type]["files"].update(error_info["files"])
+            
+        # Analyze file sizes for error correlation
+        error_file_sizes = {}
+        for file_result in self.file_results:
+            if not file_result.get("success", False) and "errors" in file_result:
+                file_size = file_result.get("file_size", 0)
+                for error in file_result.get("errors", []):
+                    error_type = error.get("type", "unknown_error")
+                    if error_type not in error_file_sizes:
+                        error_file_sizes[error_type] = []
+                    error_file_sizes[error_type].append(file_size)
+        
+        # Calculate average file size by error type
+        avg_file_sizes = {}
+        for error_type, sizes in error_file_sizes.items():
+            if sizes:
+                avg_file_sizes[error_type] = sum(sizes) / len(sizes)
+        
+        # Compile insights
+        insights = {
+            "error_types": {
+                k: {
+                    "count": v["count"],
+                    "file_count": len(v["files"]),
+                    "avg_file_size": avg_file_sizes.get(k, 0)
+                } for k, v in error_types.items()
+            },
+            "recommendations": self._generate_recommendations(error_types)
+        }
+        
+        return insights
+    
+    def _generate_recommendations(self, error_types: Dict[str, Dict[str, Any]]) -> List[str]:
+        """
+        Generate recommendations based on error patterns
+        
+        Args:
+            error_types: Dictionary of error types and counts
+            
+        Returns:
+            List of recommendation strings
+        """
+        recommendations = []
+        
+        # Check for parameter error patterns
+        if "parameter_error" in error_types and error_types["parameter_error"]["count"] > 2:
+            recommendations.append(
+                "Multiple parameter errors detected. Consider validating input parameters before batch processing."
+            )
+            
+        # Check for algorithm detection issues
+        if "algorithm_detection_warning" in error_types:
+            recommendations.append(
+                "Algorithm detection issues detected. Consider specifying the algorithm explicitly for affected files."
+            )
+            
+        # Check for decryption errors
+        if "decryption_error" in error_types and error_types["decryption_error"]["count"] > 2:
+            recommendations.append(
+                "Multiple decryption errors detected. Check if the correct key is being used for all files."
+            )
+            
+        # Check for environment errors
+        if "environment_error" in error_types:
+            recommendations.append(
+                "Environment errors detected. Ensure all required libraries are installed."
+            )
+            
+        # Default recommendation if no specific patterns detected
+        if not recommendations:
+            recommendations.append(
+                "Review individual file errors for more information."
+            )
+            
+        return recommendations
+
+
+class BatchStreamingProcessor:
+    """
+    Process multiple files for decryption with enhanced error handling and reporting
+    """
+    
+    def __init__(self, streaming_decryptor: Optional['StreamingDecryptor'] = None, 
+                max_workers: int = 0, progress_callback: Optional[Callable] = None):
+        """
+        Initialize batch processor
+        
+        Args:
+            streaming_decryptor: StreamingDecryptor instance to use
+            max_workers: Maximum number of worker threads (0 = auto)
+            progress_callback: Callback for progress updates
+        """
+        # Create or use provided decryptor
+        if streaming_decryptor:
+            self.decryptor = streaming_decryptor
+        else:
+            self.decryptor = StreamingDecryptor(progress_callback)
+            
+        # Initialize worker pool
+        self.max_workers = max_workers if max_workers > 0 else max(1, (os.cpu_count() or 4) - 1)
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
+        
+        # Set up progress tracking
+        self.progress_callback = progress_callback
+        self.progress_lock = threading.Lock()
+        self.progress_stats = {
+            "total_files": 0,
+            "completed_files": 0,
+            "successful_files": 0,
+            "failed_files": 0,
+            "current_progress": 0.0
+        }
+        
+        # Track active decryptors for algorithm reuse
+        self.algorithm_decryptors = {}
+        self.algorithm_decryptors_lock = threading.Lock()
+        
+    def process_files(self, file_mappings: List[Dict[str, str]], 
+                     algorithm: str = None, key: bytes = None, 
+                     batch_params: Dict[str, Any] = None,
+                     **kwargs) -> BatchProcessingResult:
+        """
+        Process multiple files for decryption
+        
+        Args:
+            file_mappings: List of dicts, each with 'input' and 'output' keys for file paths
+            algorithm: Encryption algorithm (see EncryptionAlgorithm)
+            key: Decryption key
+            batch_params: Parameters specific to batch processing:
+                - parallel: Whether to process files in parallel (default: True)
+                - auto_detect_algorithm: Whether to detect algorithm per file (default: True)
+                - error_threshold: Max percentage of failures before aborting (default: 100)
+                - continue_on_error: Whether to continue after errors (default: True)
+                - reuse_decryptors: Whether to reuse decryptors for same algorithm (default: True)
+                - max_retries: Maximum number of retries per file (default: 1)
+            **kwargs: Additional parameters for the decryptor (see DecryptionParams)
+            
+        Returns:
+            BatchProcessingResult with processing results and statistics
+        """
+        # Initialize batch parameters
+        if batch_params is None:
+            batch_params = {}
+            
+        parallel = batch_params.get("parallel", True)
+        auto_detect = batch_params.get("auto_detect_algorithm", True)
+        error_threshold = batch_params.get("error_threshold", 100)  # 100% means never abort
+        continue_on_error = batch_params.get("continue_on_error", True)
+        reuse_decryptors = batch_params.get("reuse_decryptors", True)
+        max_retries = batch_params.get("max_retries", 1)
+        
+        # Initialize result object
+        result = BatchProcessingResult(total_files=len(file_mappings))
+        
+        # Initialize progress tracking
+        self.progress_stats["total_files"] = len(file_mappings)
+        self.progress_stats["completed_files"] = 0
+        self.progress_stats["successful_files"] = 0
+        self.progress_stats["failed_files"] = 0
+        self.progress_stats["current_progress"] = 0.0
+        
+        # Process files based on parallel flag
+        if parallel:
+            try:
+                # Submit all tasks to thread pool
+                futures = []
+                
+                for file_mapping in file_mappings:
+                    input_file = file_mapping.get("input")
+                    output_file = file_mapping.get("output")
+                    
+                    if not input_file or not output_file:
+                        logger.warning(f"Skipping invalid file mapping: {file_mapping}")
+                        continue
+                        
+                    # Create task-specific parameters
+                    task_params = kwargs.copy()
+                    task_params["max_retries"] = max_retries
+                    task_params["auto_detect"] = auto_detect
+                    task_params["reuse_decryptors"] = reuse_decryptors
+                    
+                    # Submit task
+                    future = self.thread_pool.submit(
+                        self._process_single_file,
+                        input_file,
+                        output_file,
+                        algorithm,
+                        key,
+                        task_params
+                    )
+                    futures.append((future, input_file, output_file))
+                
+                # Track maximum concurrency
+                active_futures = set()
+                max_active = 0
+                
+                # Process results as they complete
+                for future, input_file, output_file in concurrent.futures.as_completed([f for f, _, _ in futures]):
+                    # Update active futures for concurrency tracking
+                    active_futures.add(future)
+                    max_active = max(max_active, len(active_futures))
+                    
+                    try:
+                        # Get result from future
+                        file_result = future.result()
+                        
+                        # Add file names to result if not already present
+                        if "input_file" not in file_result:
+                            file_result["input_file"] = input_file
+                        if "output_file" not in file_result:
+                            file_result["output_file"] = output_file
+                            
+                        # Add result to batch
+                        result.add_file_result(file_result)
+                        
+                        # Update progress
+                        with self.progress_lock:
+                            self.progress_stats["completed_files"] += 1
+                            
+                            if file_result.get("success", False):
+                                self.progress_stats["successful_files"] += 1
+                            else:
+                                self.progress_stats["failed_files"] += 1
+                                
+                            self.progress_stats["current_progress"] = (
+                                self.progress_stats["completed_files"] / 
+                                max(1, self.progress_stats["total_files"])
+                            )
+                            
+                            # Check error threshold
+                            if not continue_on_error:
+                                failure_percentage = (
+                                    self.progress_stats["failed_files"] / 
+                                    max(1, self.progress_stats["completed_files"]) * 100
+                                )
+                                
+                                if failure_percentage > error_threshold:
+                                    logger.error(
+                                        f"Error threshold exceeded: {failure_percentage:.1f}% > {error_threshold}%. "
+                                        f"Aborting batch processing."
+                                    )
+                                    # Cancel remaining futures
+                                    for f, _, _ in futures:
+                                        if not f.done():
+                                            f.cancel()
+                            
+                        # Call progress callback
+                        self._update_batch_progress()
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {input_file}: {e}")
+                        error_result = {
+                            "success": False,
+                            "input_file": input_file,
+                            "output_file": output_file,
+                            "error": str(e),
+                            "errors": [{
+                                "type": "batch_processing_error",
+                                "message": str(e),
+                                "severity": "high",
+                                "details": {
+                                    "exception_type": type(e).__name__
+                                }
+                            }]
+                        }
+                        result.add_file_result(error_result)
+                
+                # Update concurrency statistics
+                result.max_concurrent_threads = max_active
+                
+            except Exception as e:
+                logger.error(f"Batch processing error: {e}")
+                # Handle any remaining files as failures
+                for future, input_file, output_file in futures:
+                    if not future.done():
+                        error_result = {
+                            "success": False,
+                            "input_file": input_file,
+                            "output_file": output_file,
+                            "error": "Batch processing aborted",
+                            "errors": [{
+                                "type": "batch_aborted",
+                                "message": f"Batch processing aborted: {str(e)}",
+                                "severity": "high",
+                                "details": {
+                                    "exception_type": type(e).__name__
+                                }
+                            }]
+                        }
+                        result.add_file_result(error_result)
+                        
+        else:
+            # Process files sequentially
+            for file_mapping in file_mappings:
+                input_file = file_mapping.get("input")
+                output_file = file_mapping.get("output")
+                
+                if not input_file or not output_file:
+                    logger.warning(f"Skipping invalid file mapping: {file_mapping}")
+                    continue
+                    
+                # Create task-specific parameters
+                task_params = kwargs.copy()
+                task_params["max_retries"] = max_retries
+                task_params["auto_detect"] = auto_detect
+                task_params["reuse_decryptors"] = reuse_decryptors
+                
+                try:
+                    # Process file
+                    file_result = self._process_single_file(
+                        input_file,
+                        output_file,
+                        algorithm,
+                        key,
+                        task_params
+                    )
+                    
+                    # Add result to batch
+                    result.add_file_result(file_result)
+                    
+                    # Update progress
+                    with self.progress_lock:
+                        self.progress_stats["completed_files"] += 1
+                        
+                        if file_result.get("success", False):
+                            self.progress_stats["successful_files"] += 1
+                        else:
+                            self.progress_stats["failed_files"] += 1
+                            
+                        self.progress_stats["current_progress"] = (
+                            self.progress_stats["completed_files"] / 
+                            max(1, self.progress_stats["total_files"])
+                        )
+                        
+                        # Check error threshold
+                        if not continue_on_error:
+                            failure_percentage = (
+                                self.progress_stats["failed_files"] / 
+                                max(1, self.progress_stats["completed_files"]) * 100
+                            )
+                            
+                            if failure_percentage > error_threshold:
+                                logger.error(
+                                    f"Error threshold exceeded: {failure_percentage:.1f}% > {error_threshold}%. "
+                                    f"Aborting batch processing."
+                                )
+                                break
+                        
+                    # Call progress callback
+                    self._update_batch_progress()
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {input_file}: {e}")
+                    error_result = {
+                        "success": False,
+                        "input_file": input_file,
+                        "output_file": output_file,
+                        "error": str(e),
+                        "errors": [{
+                            "type": "batch_processing_error",
+                            "message": str(e),
+                            "severity": "high",
+                            "details": {
+                                "exception_type": type(e).__name__
+                            }
+                        }]
+                    }
+                    result.add_file_result(error_result)
+                    
+                    if not continue_on_error:
+                        logger.error("Aborting batch processing due to error")
+                        break
+        
+        # Finalize result
+        result.finalize()
+        
+        return result
+    
+    def _process_single_file(self, input_file: str, output_file: str, 
+                            algorithm: str, key: bytes, 
+                            params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a single file for decryption
+        
+        Args:
+            input_file: Path to encrypted input file
+            output_file: Path to save decrypted output
+            algorithm: Encryption algorithm
+            key: Decryption key
+            params: Decryption parameters
+            
+        Returns:
+            Result dictionary with status and metadata
+        """
+        # Initialize result with file information
+        result = {
+            "input_file": input_file,
+            "output_file": output_file,
+            "success": False,
+            "algorithm": algorithm,
+            "start_time": time.time(),
+            "end_time": None,
+            "duration": 0,
+            "bytes_processed": 0,
+            "throughput_bps": 0,
+            "errors": [],
+            "warnings": []
+        }
+        
+        # Check if files exist
+        if not os.path.exists(input_file):
+            result["errors"].append({
+                "type": "file_not_found",
+                "message": f"Input file not found: {input_file}",
+                "severity": "critical"
+            })
+            result["error"] = f"Input file not found: {input_file}"
+            return self._finalize_result(result)
+            
+        # Create parent directories for output file if needed
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+            except Exception as e:
+                result["errors"].append({
+                    "type": "directory_creation_error",
+                    "message": f"Error creating output directory: {str(e)}",
+                    "severity": "critical",
+                    "details": {
+                        "exception_type": type(e).__name__,
+                        "directory": output_dir
+                    }
+                })
+                result["error"] = f"Error creating output directory: {str(e)}"
+                return self._finalize_result(result)
+        
+        # Prepare decryption parameters
+        try:
+            # Get file size
+            file_size = os.path.getsize(input_file)
+            result["file_size"] = file_size
+            
+            # Auto-detect algorithm if needed
+            if params.get("auto_detect", False) and hasattr(self.decryptor, 'algorithm_detector'):
+                try:
+                    detected = self.decryptor.algorithm_detector.detect_algorithm(input_file)
+                    if detected and detected.get("confidence", 0) > 0.7:
+                        # Use detected algorithm
+                        algorithm = detected.get("algorithm")
+                        result["algorithm"] = algorithm
+                        result["detected_algorithm_info"] = {
+                            "confidence": detected.get("confidence"),
+                            "algorithm": detected.get("algorithm"),
+                            "params": detected.get("params", {})
+                        }
+                        
+                        # Add detected parameters
+                        for param_key, param_value in detected.get("params", {}).items():
+                            if param_key not in params:
+                                params[param_key] = param_value
+                except Exception as e:
+                    result["warnings"].append({
+                        "type": "algorithm_detection_warning",
+                        "message": f"Error during algorithm detection: {str(e)}",
+                        "severity": "medium",
+                        "details": {
+                            "exception_type": type(e).__name__
+                        }
+                    })
+            
+            # Check for algorithm reuse option
+            if params.get("reuse_decryptors", True) and algorithm:
+                with self.algorithm_decryptors_lock:
+                    if algorithm in self.algorithm_decryptors:
+                        # We have a cached decryptor instance for this algorithm
+                        result["warnings"].append({
+                            "type": "decryptor_reuse",
+                            "message": f"Reusing existing decryptor for algorithm: {algorithm}",
+                            "severity": "low"
+                        })
+                        
+                        # TODO: Implement decryptor reuse functionality
+                        # This would require refactoring decrypt_file to accept a decryptor instance
+                        pass
+            
+            # Process retries
+            max_retries = params.get("max_retries", 1)
+            for retry in range(max_retries + 1):  # +1 because first attempt is not a retry
+                if retry > 0:
+                    result["warnings"].append({
+                        "type": "retry_attempt",
+                        "message": f"Retry attempt {retry}/{max_retries}",
+                        "severity": "medium"
+                    })
+                
+                # Execute decryption
+                decrypt_result = self.decryptor.decrypt_file(input_file, output_file, algorithm, key, **params)
+                
+                # Check if successful
+                if decrypt_result.get("success", False):
+                    # Update result with successful decryption info
+                    result.update(decrypt_result)
+                    result["success"] = True
+                    if retry > 0:
+                        result["warnings"].append({
+                            "type": "successful_retry",
+                            "message": f"Decryption succeeded after {retry} retries",
+                            "severity": "low"
+                        })
+                    break
+                elif retry < max_retries:
+                    # Store info about failed attempt
+                    result["warnings"].append({
+                        "type": "retry_info",
+                        "message": f"Attempt {retry+1} failed: {decrypt_result.get('error', 'Unknown error')}",
+                        "severity": "medium",
+                        "details": {
+                            "attempt": retry+1,
+                            "error": decrypt_result.get("error", "Unknown error")
+                        }
+                    })
+                else:
+                    # Final attempt failed, copy error information
+                    if "error" in decrypt_result:
+                        result["error"] = decrypt_result["error"]
+                    if "errors" in decrypt_result:
+                        result["errors"].extend(decrypt_result["errors"])
+                    else:
+                        # Create structured error if only string error available
+                        result["errors"].append({
+                            "type": "decryption_error",
+                            "message": decrypt_result.get("error", "Unknown decryption error"),
+                            "severity": "high",
+                            "details": {
+                                "algorithm": algorithm
+                            }
+                        })
+                    
+                    # Copy other fields
+                    if "bytes_processed" in decrypt_result:
+                        result["bytes_processed"] = decrypt_result["bytes_processed"]
+                    if "partial_success" in decrypt_result:
+                        result["partial_success"] = decrypt_result["partial_success"]
+                    if "validation" in decrypt_result:
+                        result["validation"] = decrypt_result["validation"]
+                    if "warnings" in decrypt_result:
+                        result["warnings"].extend(decrypt_result["warnings"])
+        
+        except Exception as e:
+            logger.error(f"Error processing file {input_file}: {e}")
+            result["errors"].append({
+                "type": "processing_error",
+                "message": str(e),
+                "severity": "high",
+                "details": {
+                    "exception_type": type(e).__name__
+                }
+            })
+            result["error"] = str(e)
+        
+        return self._finalize_result(result)
+    
+    def _finalize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Finalize result with timing and performance metrics
+        
+        Args:
+            result: Result dictionary
+            
+        Returns:
+            Updated result dictionary
+        """
+        # Set end time and calculate duration
+        result["end_time"] = time.time()
+        result["duration"] = result["end_time"] - result["start_time"]
+        
+        # Calculate throughput
+        if result["duration"] > 0 and "bytes_processed" in result and result["bytes_processed"] > 0:
+            result["throughput_bps"] = result["bytes_processed"] / result["duration"]
+        
+        return result
+    
+    def _update_batch_progress(self):
+        """Update batch progress using callback if provided"""
+        if self.progress_callback:
+            try:
+                self.progress_callback(self.progress_stats)
+            except Exception as e:
+                logger.debug(f"Error in progress callback: {e}")
+
+
 class StreamingDecryptor:
     """
     Memory-efficient streaming decryption engine that supports multiple algorithms
@@ -173,6 +996,85 @@ class StreamingDecryptor:
         # Initialize threading
         self.max_workers = max(1, (os.cpu_count() or 4) - 1)
         self.thread_pool = None
+        
+        # Create batch processor
+        self.batch_processor = BatchStreamingProcessor(self)
+    
+    def batch_decrypt(self, file_mappings: List[Dict[str, str]], 
+                     algorithm: str = None, key: bytes = None, 
+                     batch_params: Dict[str, Any] = None,
+                     **kwargs) -> Dict[str, Any]:
+        """
+        Decrypt multiple files in batch mode with enhanced error handling
+        
+        Args:
+            file_mappings: List of dicts, each with 'input' and 'output' keys for file paths
+            algorithm: Encryption algorithm (see EncryptionAlgorithm)
+            key: Decryption key
+            batch_params: Parameters specific to batch processing:
+                - parallel: Whether to process files in parallel (default: True)
+                - auto_detect_algorithm: Whether to detect algorithm per file (default: True)
+                - error_threshold: Max percentage of failures before aborting (default: 100)
+                - continue_on_error: Whether to continue after errors (default: True)
+                - reuse_decryptors: Whether to reuse decryptors for same algorithm (default: True)
+                - max_retries: Maximum number of retries per file (default: 1)
+                - save_summary: Whether to save summary to a JSON file (default: False)
+                - summary_file: Path to save summary information (default: None)
+            **kwargs: Additional parameters for decryption (see DecryptionParams)
+            
+        Returns:
+            Dictionary with batch processing summary and results
+        """
+        # Process files using batch processor
+        result = self.batch_processor.process_files(
+            file_mappings, algorithm, key, batch_params, **kwargs
+        )
+        
+        # Apply enhanced error pattern analysis
+        error_pattern_analysis = batch_params.get("error_pattern_analysis", False) if batch_params else False
+        if error_pattern_analysis and result.failed_files > 0:
+            try:
+                # Import error pattern detector
+                from decryption_tools.enhanced_error_pattern_detector import EnhancedErrorPatternDetector
+                error_detector = EnhancedErrorPatternDetector()
+                
+                # Analyze file results
+                error_analysis = error_detector.analyze_error_patterns(result.file_results)
+                
+                # Add analysis to summary
+                summary = result.get_summary()
+                summary["enhanced_error_analysis"] = error_analysis
+                
+                # Add recommendations to summary
+                if "recommendations" in error_analysis:
+                    summary["enhanced_recommendations"] = error_analysis["recommendations"]
+                
+                # Update result object with enhanced analysis
+                result.enhanced_error_analysis = error_analysis
+            except Exception as e:
+                logger.warning(f"Enhanced error pattern analysis failed: {e}")
+        
+        # Save summary if requested
+        if batch_params and batch_params.get("save_summary", False):
+            summary_file = batch_params.get("summary_file")
+            if summary_file:
+                try:
+                    summary = result.get_summary()
+                    
+                    # Add basic error patterns and recommendations
+                    if result.failed_files > 0:
+                        insights = result.get_error_patterns()
+                        summary["error_insights"] = insights
+                    
+                    # Save to file
+                    import json  # Import here to avoid circular imports
+                    with open(summary_file, 'w') as f:
+                        json.dump(summary, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Error saving batch summary: {e}")
+        
+        # Return summary
+        return result.get_summary()
     
     def decrypt_file(self, input_file: str, output_file: str, algorithm: str,
                     key: bytes, **kwargs) -> Dict[str, Any]:
