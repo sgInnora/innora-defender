@@ -1757,312 +1757,694 @@ class AlgorithmDetector:
     
     def detect_algorithm(self, encrypted_file: str, known_family: Optional[str] = None) -> Dict[str, Any]:
         """
-        Detect the encryption algorithm used in a file.
+        检测文件所使用的加密算法。
+        
+        该方法通过分析文件特征，如熵值、文件头部签名、加密特征等，
+        来确定可能使用的加密算法和相关参数。它支持勒索软件家族的检测，
+        并能处理各种错误情况。
         
         Args:
-            encrypted_file: Path to encrypted file
-            known_family: Ransomware family if known
+            encrypted_file: 需要检测的加密文件路径
+            known_family: 已知的勒索软件家族名称（如果有）
             
         Returns:
-            Dictionary with detected algorithm and parameters
+            包含检测到的算法、参数和元数据的结果字典
         """
-        # Initialize result with defaults
+        # 初始化详细的结果结构
         result = {
-            "algorithm": "aes-cbc",  # Default fallback
-            "confidence": 0.0,
-            "params": {},
-            "errors": []  # Track errors during detection process
+            "algorithm": "aes-cbc",  # 默认算法
+            "confidence": 0.0,       # 初始置信度
+            "params": {},            # 算法参数
+            "errors": [],            # 错误列表
+            "warnings": [],          # 警告列表
+            "analysis": {            # 分析数据
+                "file_info": {},      # 文件信息
+                "entropy_values": {}, # 熵值分析
+                "signatures": [],     # 检测到的签名
+                "pattern_matches": [] # 模式匹配情况
+            },
+            "metadata": {            # 元数据
+                "start_time": time.time(),
+                "end_time": None,
+                "duration": 0,
+                "version": "2.0",    # 新的API版本
+                "analyzer": "AlgorithmDetector"
+            }
         }
         
-        # Handle known family if provided
-        if known_family:
+        # ====================== 第1阶段: 验证输入参数 ======================
+        
+        # 检查文件路径参数
+        if encrypted_file is None or not isinstance(encrypted_file, str) or not encrypted_file.strip():
+            error = {
+                "type": "parameter_error",
+                "message": "无效的文件路径参数",
+                "severity": "critical",
+                "details": {"path": str(encrypted_file)}
+            }
+            result["errors"].append(error)
+            # 完成元数据
+            self._finalize_metadata(result)
+            return result
+        
+        # 处理家族参数
+        if known_family is not None:
             try:
-                family = known_family.lower()
+                # 尝试将家族名称转为小写并查找匹配
+                family = str(known_family).lower()
                 if family in self.family_algorithm_map:
                     result["algorithm"] = self.family_algorithm_map[family]
                     result["confidence"] = 0.85
                     result["params"]["family_match"] = True
                     result["family"] = family
+                    result["analysis"]["detected_by"] = "explicit_family"
+                    # 完成元数据
+                    self._finalize_metadata(result)
+                    # 添加家族特定参数
+                    self._add_family_specific_params(result)
                     return result
-            except (AttributeError, TypeError) as e:
-                result["errors"].append(f"Invalid family name: {e}")
+                else:
+                    # 无效家族名称，但继续处理
+                    result["warnings"].append({
+                        "type": "unknown_family",
+                        "message": f"未知的勒索软件家族: {family}",
+                        "severity": "low"
+                    })
+            except (AttributeError, TypeError, ValueError) as e:
+                result["warnings"].append({
+                    "type": "invalid_family_parameter",
+                    "message": f"无效的家族参数: {e}",
+                    "severity": "low",
+                    "details": {"exception": str(e), "family_type": type(known_family).__name__}
+                })
         
-        # Check if file exists
+        # ====================== 第2阶段: 文件访问检查 ======================
+        
+        # 检查文件是否存在
         if not os.path.exists(encrypted_file):
-            result["errors"].append(f"File not found: {encrypted_file}")
+            error = {
+                "type": "file_access_error",
+                "message": f"文件不存在: {encrypted_file}",
+                "severity": "critical"
+            }
+            result["errors"].append(error)
+            # 完成元数据
+            self._finalize_metadata(result)
             return result
             
-        # Check if file is accessible
+        # 检查文件是否可读
         if not os.access(encrypted_file, os.R_OK):
-            result["errors"].append(f"File not readable: {encrypted_file}")
+            error = {
+                "type": "file_access_error",
+                "message": f"文件不可读: {encrypted_file}",
+                "severity": "critical",
+                "details": {"path": encrypted_file, "permissions": "无读取权限"}
+            }
+            result["errors"].append(error)
+            # 完成元数据
+            self._finalize_metadata(result)
             return result
         
-        # Check if file extension matches known ransomware families
+        # ====================== 第3阶段: 基本文件分析 ======================
+        
+        # 获取文件扩展名并检查是否匹配已知勒索软件家族
         try:
+            # 记录文件基本信息
+            result["analysis"]["file_info"]["path"] = encrypted_file
+            result["analysis"]["file_info"]["filename"] = os.path.basename(encrypted_file)
+            
+            # 分析文件扩展名
             file_ext = os.path.splitext(encrypted_file)[1].lower()
+            result["analysis"]["file_info"]["extension"] = file_ext
+            
             if file_ext in self.family_extensions:
                 detected_family = self.family_extensions[file_ext]
                 result["algorithm"] = self.family_algorithm_map.get(detected_family, result["algorithm"])
-                result["confidence"] = 0.75  # Good confidence but not as high as explicit family
+                result["confidence"] = 0.75  # 比显式指定的置信度低
                 result["params"]["extension_match"] = True
                 result["family"] = detected_family
-                
-                # We'll continue with the analysis to potentially improve confidence
+                result["analysis"]["detected_by"] = "file_extension"
         except Exception as e:
-            result["errors"].append(f"Error processing file extension: {e}")
+            result["warnings"].append({
+                "type": "extension_analysis_warning",
+                "message": f"分析文件扩展名时出错: {e}",
+                "severity": "low",
+                "details": {"exception_type": type(e).__name__}
+            })
+        
+        # 获取文件大小
+        try:
+            file_size = os.path.getsize(encrypted_file)
+            result["analysis"]["file_info"]["size"] = file_size
+            
+            # 检查文件是否过小
+            if file_size < 100:
+                result["warnings"].append({
+                    "type": "file_too_small",
+                    "message": "文件太小，无法可靠分析",
+                    "severity": "medium",
+                    "details": {"file_size": file_size, "min_size": 100}
+                })
+                result["params"]["too_small"] = True
+                # 完成元数据并返回
+                self._finalize_metadata(result)
+                return result
+                
+        except (OSError, IOError) as e:
+            result["errors"].append({
+                "type": "file_access_error",
+                "message": f"无法获取文件大小: {e}",
+                "severity": "high",
+                "details": {"exception_type": type(e).__name__}
+            })
+            # 完成元数据并返回
+            self._finalize_metadata(result)
+            return result
+        
+        # ====================== 第4阶段: 文件采样与内容分析 ======================
+        
+        # 安全读取文件样本
+        header, middle_sample, footer = self._safely_read_file_samples(encrypted_file, file_size, result)
+        
+        # 如果无法读取文件头，则无法继续分析
+        if not header:
+            result["errors"].append({
+                "type": "file_access_error",
+                "message": "无法读取文件头部，停止分析",
+                "severity": "critical"
+            })
+            # 完成元数据并返回
+            self._finalize_metadata(result)
+            return result
+        
+        # 检查文件签名
+        self._check_file_signatures(header, result)
+        
+        # 如果已经有高置信度的检测结果，添加家族特定参数并返回
+        if result["confidence"] > 0.9 and result.get("family"):
+            self._add_family_specific_params(result)
+            # 完成元数据
+            self._finalize_metadata(result)
+            return result
+        
+        # ====================== 第5阶段: 熵分析与算法检测 ======================
+        
+        # 获取熵分析器
+        entropy_analyzer = self._get_entropy_analyzer(result)
+        if not entropy_analyzer:
+            # 所有熵分析器都失败，创建一个默认的
+            class DummyEntropyAnalyzer:
+                def calculate_entropy(self, data):
+                    return 5.0  # 中等熵值作为默认值
+            entropy_analyzer = DummyEntropyAnalyzer()
+            result["warnings"].append({
+                "type": "entropy_analyzer_warning",
+                "message": "所有熵分析器都初始化失败，使用固定熵值",
+                "severity": "medium"
+            })
+        
+        # 计算各部分样本的熵值
+        header_entropy, middle_entropy, footer_entropy = self._calculate_sample_entropy(
+            entropy_analyzer, header, middle_sample, footer, result
+        )
+        
+        # 记录熵值
+        result["analysis"]["entropy_values"] = {
+            "header": header_entropy,
+            "middle": middle_entropy,
+            "footer": footer_entropy,
+            "threshold": self.entropy_threshold
+        }
+        
+        # 检查数据是否加密（基于熵值）
+        is_encrypted = header_entropy > self.entropy_threshold
+        result["analysis"]["is_encrypted"] = is_encrypted
+        
+        if not is_encrypted:
+            result["warnings"].append({
+                "type": "low_entropy_warning",
+                "message": "文件熵值低于加密阈值，可能未加密",
+                "severity": "medium",
+                "details": {
+                    "header_entropy": header_entropy,
+                    "threshold": self.entropy_threshold
+                }
+            })
+            # 完成元数据
+            self._finalize_metadata(result)
+            return result
+        
+        # ====================== 第6阶段: 特征提取与算法模式匹配 ======================
+        
+        # 创建算法检测的特征集
+        features = self._create_detection_features(header_entropy, middle_entropy, footer_entropy, file_size)
+        
+        # 根据特征检查算法模式
+        self._check_algorithm_patterns(
+            features, header, middle_sample, footer, 
+            entropy_analyzer, result
+        )
+        
+        # ====================== 第7阶段: 参数优化与结果生成 ======================
+        
+        # 添加块大小参数
+        self._add_block_size_parameters(result)
+        
+        # 检测文件头大小
+        if file_size > 256 and "header_size" not in result["params"]:
+            self._detect_header_size(
+                encrypted_file, file_size, header_entropy,
+                entropy_analyzer, result
+            )
+        
+        # 根据算法调整特定参数
+        self._adjust_algorithm_params(result)
+        
+        # 添加家族特定参数（如果有检测到家族）
+        if "detected_family" in result["params"] or "family" in result:
+            self._add_family_specific_params(result)
+        
+        # 完成元数据并返回结果
+        self._finalize_metadata(result)
+        return result
+        
+    def _safely_read_file_samples(self, file_path: str, file_size: int, result: Dict[str, Any]) -> Tuple[bytes, bytes, bytes]:
+        """安全地读取文件样本（头部、中部和尾部）"""
+        header = b""
+        middle_sample = b""
+        footer = b""
         
         try:
-            # Check file characteristics
-            try:
-                file_size = os.path.getsize(encrypted_file)
-            except (OSError, IOError) as e:
-                result["errors"].append(f"Error getting file size: {e}")
-                return result
-            
-            # Skip very small files
-            if file_size < 100:
-                result["params"]["too_small"] = True
-                return result
-                
-            # Read file samples safely
-            header = b""
-            middle_sample = b""
-            footer = b""
-            
-            try:
-                with open(encrypted_file, 'rb') as f:
-                    # Read header
+            with open(file_path, 'rb') as f:
+                # 读取头部
+                try:
                     header = f.read(min(512, file_size))
-                    
-                    # Read a sample from the middle of the file
-                    if file_size > 1024:
-                        try:
-                            f.seek(file_size // 2)
-                            middle_sample = f.read(min(512, file_size - file_size // 2))
-                        except (OSError, IOError) as e:
-                            result["errors"].append(f"Error reading middle of file: {e}")
-                    
-                    # For large files, get footer as well
-                    if file_size > 1024:
-                        try:
-                            f.seek(max(0, file_size - 512))
-                            footer = f.read(512)
-                        except (OSError, IOError) as e:
-                            result["errors"].append(f"Error reading end of file: {e}")
-            except (IOError, OSError, PermissionError) as e:
-                result["errors"].append(f"Error opening file: {e}")
-                return result
-            
-            # Check for file signatures with improved error handling
-            try:
-                for offset, signature, family, confidence in self.file_signatures:
-                    # Skip if header is too short for this signature check
-                    if len(header) <= offset:
-                        continue
-                        
-                    try:
-                        # Safely check for signature
-                        if signature in header[offset:offset+len(signature)]:
-                            # Found a signature match
-                            algorithm = self.family_algorithm_map.get(family, result["algorithm"])
-                            
-                            # Only update if confidence is higher
-                            if confidence > result["confidence"]:
-                                result["algorithm"] = algorithm
-                                result["confidence"] = confidence
-                                result["params"]["signature_match"] = True
-                                result["params"]["detected_family"] = family
-                                result["family"] = family
-                    except (IndexError, TypeError) as e:
-                        result["errors"].append(f"Error checking signature {signature!r} at offset {offset}: {e}")
-            except Exception as e:
-                result["errors"].append(f"Error during signature checking: {e}")
-            
-            # If we already have high confidence, add family-specific parameters and return
-            if result["confidence"] > 0.9 and result.get("family"):
-                self._add_family_specific_params(result)
-                return result
-                
-            # Calculate entropy of samples with improved error handling
-            entropy_analyzer = None
-            try:
-                try:
-                    from tools.crypto.entropy.entropy_analyzer import EntropyAnalyzer
-                    entropy_analyzer = EntropyAnalyzer()
-                except ImportError:
-                    # Fallback to our local entropy calculation
-                    entropy_analyzer = self
-                    result["errors"].append("External entropy analyzer not available, using internal implementation")
-            except Exception as e:
-                result["errors"].append(f"Error loading entropy analyzer: {e}")
-                # If both external and internal entropy analyzers fail, create a dummy one to avoid failures
-                class DummyEntropyAnalyzer:
-                    def calculate_entropy(self, data):
-                        return 5.0  # Return a middle-of-the-road value
-                entropy_analyzer = DummyEntropyAnalyzer()
-                
-            # Calculate entropy with error handling for each sample
-            header_entropy = 0
-            middle_entropy = 0
-            footer_entropy = 0
-            
-            try:
-                header_entropy = entropy_analyzer.calculate_entropy(header)
-            except Exception as e:
-                result["errors"].append(f"Error calculating header entropy: {e}")
-                
-            try:
-                middle_entropy = entropy_analyzer.calculate_entropy(middle_sample) if middle_sample else 0
-            except Exception as e:
-                result["errors"].append(f"Error calculating middle sample entropy: {e}")
-                
-            try:
-                footer_entropy = entropy_analyzer.calculate_entropy(footer) if footer else 0
-            except Exception as e:
-                result["errors"].append(f"Error calculating footer entropy: {e}")
-            
-            # Check if data is encrypted based on entropy
-            is_encrypted = header_entropy > self.entropy_threshold
-            
-            if not is_encrypted:
-                # Not encrypted or using a different encryption format
-                return result
-                
-            # Create features for algorithm detection
-            features = {
-                "header_entropy": header_entropy,
-                "middle_entropy": middle_entropy,
-                "footer_entropy": footer_entropy,
-                "file_size": file_size,
-                "header_contains": {},
-                "content_contains": {},
-                "iv_at_start": False,
-                "iv_absent": False,
-                "has_nonce": False
-            }
-            
-            # Check for algorithm-specific markers with improved error handling
-            try:
-                for algo, patterns in self.algorithm_patterns.items():
-                    for pattern in patterns:
-                        try:
-                            # Check header contains pattern
-                            if "header_contains" in pattern:
-                                try:
-                                    marker = pattern["header_contains"]
-                                    if marker and header and marker in header:
-                                        features["header_contains"][marker] = True
-                                        
-                                        # Update result if confidence is higher
-                                        if pattern["confidence"] > result["confidence"]:
-                                            result["algorithm"] = algo
-                                            result["confidence"] = pattern["confidence"]
-                                except Exception as e:
-                                    result["errors"].append(f"Error checking header pattern for {algo}: {e}")
-                            
-                            # Check content contains pattern
-                            if "content_contains" in pattern:
-                                try:
-                                    marker = pattern["content_contains"]
-                                    if marker and (
-                                        (header and marker in header) or 
-                                        (middle_sample and marker in middle_sample) or
-                                        (footer and marker in footer)
-                                    ):
-                                        features["content_contains"][marker] = True
-                                        
-                                        # Update result if confidence is higher
-                                        if pattern["confidence"] > result["confidence"]:
-                                            result["algorithm"] = algo
-                                            result["confidence"] = pattern["confidence"]
-                                except Exception as e:
-                                    result["errors"].append(f"Error checking content pattern for {algo}: {e}")
-                            
-                            # Check IV characteristics
-                            if "iv_at_start" in pattern and pattern["iv_at_start"]:
-                                try:
-                                    iv_size = pattern.get("iv_size", 16)
-                                    # Check if first iv_size bytes could be an IV (high entropy)
-                                    if len(header) >= iv_size:
-                                        iv_block = header[:iv_size]
-                                        try:
-                                            iv_entropy = entropy_analyzer.calculate_entropy(iv_block)
-                                            if iv_entropy > 7.0:
-                                                features["iv_at_start"] = True
-                                                result["params"]["iv_in_file"] = True
-                                                result["params"]["iv_offset"] = 0
-                                                result["params"]["iv_size"] = iv_size
-                                                
-                                                # Update result if confidence is higher
-                                                if pattern["confidence"] > result["confidence"]:
-                                                    result["algorithm"] = algo
-                                                    result["confidence"] = pattern["confidence"]
-                                        except Exception as e:
-                                            result["errors"].append(f"Error calculating IV entropy for {algo}: {e}")
-                                except Exception as e:
-                                    result["errors"].append(f"Error checking IV characteristics for {algo}: {e}")
-                        except Exception as e:
-                            result["errors"].append(f"Error processing pattern for {algo}: {e}")
-                            continue
-            except Exception as e:
-                result["errors"].append(f"Error during algorithm pattern matching: {e}")
-            
-            # Handle block size detection
-            if "aes" in result["algorithm"]:
-                # AES uses 16-byte block size
-                result["params"]["block_size"] = 16
-            elif result["algorithm"] == "chacha20":
-                # ChaCha20 block size is 64 bytes
-                result["params"]["block_size"] = 64
-            elif result["algorithm"] == "salsa20":
-                # Salsa20 block size is 64 bytes
-                result["params"]["block_size"] = 64
-            
-            # Add header detection with improved error handling
-            if file_size > 256 and "header_size" not in result["params"]:
-                try:
-                    # Try to detect header by scanning for entropy changes
-                    for offset in [8, 16, 32, 64, 128, 256]:
-                        if offset >= file_size:
-                            break
-                        
-                        try:
-                            post_header = b""
-                            try:
-                                with open(encrypted_file, 'rb') as f:
-                                    f.seek(offset)
-                                    post_header = f.read(256)
-                            except (IOError, OSError, PermissionError) as e:
-                                result["errors"].append(f"Error reading file at offset {offset}: {e}")
-                                continue
-                            
-                            if len(post_header) >= 16:
-                                try:
-                                    post_header_entropy = entropy_analyzer.calculate_entropy(post_header[:16])
-                                    
-                                    # If entropy jumps at this offset, likely a header boundary
-                                    if abs(post_header_entropy - header_entropy) > 1.0:
-                                        result["params"]["header_size"] = offset
-                                        break
-                                except Exception as e:
-                                    result["errors"].append(f"Error calculating post-header entropy at offset {offset}: {e}")
-                        except Exception as e:
-                            result["errors"].append(f"Error processing offset {offset} for header detection: {e}")
                 except Exception as e:
-                    result["errors"].append(f"Error during header detection: {e}")
-            
-            # Perform algorithm-specific parameter adjustments
-            self._adjust_algorithm_params(result)
-            
-            # If we have a family detection, add family-specific parameters
-            if "detected_family" in result["params"]:
-                self._add_family_specific_params(result)
-            
-            return result
-            
+                    result["errors"].append({
+                        "type": "file_read_error",
+                        "message": f"读取文件头部时出错: {e}",
+                        "severity": "high",
+                        "details": {"exception_type": type(e).__name__}
+                    })
+                
+                # 读取中部样本
+                if file_size > 1024:
+                    try:
+                        f.seek(file_size // 2)
+                        middle_sample = f.read(min(512, file_size - file_size // 2))
+                    except Exception as e:
+                        result["warnings"].append({
+                            "type": "file_read_warning",
+                            "message": f"读取文件中部时出错: {e}",
+                            "severity": "medium",
+                            "details": {"exception_type": type(e).__name__}
+                        })
+                
+                # 读取尾部样本
+                if file_size > 1024:
+                    try:
+                        f.seek(max(0, file_size - 512))
+                        footer = f.read(512)
+                    except Exception as e:
+                        result["warnings"].append({
+                            "type": "file_read_warning",
+                            "message": f"读取文件尾部时出错: {e}",
+                            "severity": "medium",
+                            "details": {"exception_type": type(e).__name__}
+                        })
         except Exception as e:
-            logger.error(f"Error detecting algorithm: {e}")
-            return result
+            result["errors"].append({
+                "type": "file_access_error",
+                "message": f"打开文件时出错: {e}",
+                "severity": "critical",
+                "details": {
+                    "exception_type": type(e).__name__,
+                    "file_path": file_path
+                }
+            })
+        
+        return header, middle_sample, footer
+    
+    def _check_file_signatures(self, header: bytes, result: Dict[str, Any]) -> None:
+        """检查文件签名以识别勒索软件家族"""
+        try:
+            # 保存已检测到的签名
+            detected_signatures = []
+            
+            for offset, signature, family, confidence in self.file_signatures:
+                # 如果头部太短，跳过这个签名检查
+                if len(header) <= offset:
+                    continue
+                    
+                try:
+                    # 安全检查签名
+                    signature_match = False
+                    
+                    # 尝试精确匹配
+                    if offset + len(signature) <= len(header) and header[offset:offset+len(signature)] == signature:
+                        signature_match = True
+                    # 尝试包含匹配（更宽松）
+                    elif signature in header[offset:]:
+                        signature_match = True
+                    
+                    if signature_match:
+                        # 找到匹配的签名
+                        algorithm = self.family_algorithm_map.get(family, result["algorithm"])
+                        
+                        # 记录检测到的签名
+                        detected_signatures.append({
+                            "signature": signature,
+                            "offset": offset,
+                            "family": family,
+                            "confidence": confidence,
+                            "algorithm": algorithm
+                        })
+                        
+                        # 只在置信度更高时更新结果
+                        if confidence > result["confidence"]:
+                            result["algorithm"] = algorithm
+                            result["confidence"] = confidence
+                            result["params"]["signature_match"] = True
+                            result["params"]["detected_family"] = family
+                            result["family"] = family
+                            result["analysis"]["detected_by"] = "signature_match"
+                except (IndexError, TypeError) as e:
+                    result["warnings"].append({
+                        "type": "signature_check_warning",
+                        "message": f"检查签名时出错: {signature!r} at offset {offset}: {e}",
+                        "severity": "low",
+                        "details": {"exception_type": type(e).__name__}
+                    })
+            
+            # 添加所有检测到的签名到分析结果中
+            result["analysis"]["signatures"] = detected_signatures
+        except Exception as e:
+            result["warnings"].append({
+                "type": "signature_process_warning",
+                "message": f"处理签名检查时出错: {e}",
+                "severity": "medium",
+                "details": {"exception_type": type(e).__name__}
+            })
+    
+    def _get_entropy_analyzer(self, result: Dict[str, Any]) -> Any:
+        """获取熵分析器，如果外部分析器不可用，则回退到内部实现"""
+        try:
+            try:
+                # 尝试导入外部熵分析器
+                from tools.crypto.entropy.entropy_analyzer import EntropyAnalyzer
+                return EntropyAnalyzer()
+            except ImportError:
+                # 回退到我们的本地熵计算
+                result["warnings"].append({
+                    "type": "entropy_analyzer_warning",
+                    "message": "外部熵分析器不可用，使用内部实现",
+                    "severity": "low"
+                })
+                return self
+        except Exception as e:
+            result["warnings"].append({
+                "type": "entropy_analyzer_warning",
+                "message": f"加载熵分析器时出错: {e}",
+                "severity": "medium",
+                "details": {"exception_type": type(e).__name__}
+            })
+            return None
+    
+    def _calculate_sample_entropy(self, entropy_analyzer, header, middle_sample, footer, result):
+        """计算各样本部分的熵值"""
+        header_entropy = 0
+        middle_entropy = 0
+        footer_entropy = 0
+        
+        # 计算头部熵值
+        try:
+            header_entropy = entropy_analyzer.calculate_entropy(header)
+        except Exception as e:
+            result["warnings"].append({
+                "type": "entropy_calculation_warning",
+                "message": f"计算头部熵值时出错: {e}",
+                "severity": "medium",
+                "details": {"exception_type": type(e).__name__}
+            })
+            # 使用默认值
+            header_entropy = 5.0
+        
+        # 计算中部熵值
+        try:
+            middle_entropy = entropy_analyzer.calculate_entropy(middle_sample) if middle_sample else 0
+        except Exception as e:
+            result["warnings"].append({
+                "type": "entropy_calculation_warning",
+                "message": f"计算中部熵值时出错: {e}",
+                "severity": "low",
+                "details": {"exception_type": type(e).__name__}
+            })
+        
+        # 计算尾部熵值
+        try:
+            footer_entropy = entropy_analyzer.calculate_entropy(footer) if footer else 0
+        except Exception as e:
+            result["warnings"].append({
+                "type": "entropy_calculation_warning",
+                "message": f"计算尾部熵值时出错: {e}",
+                "severity": "low",
+                "details": {"exception_type": type(e).__name__}
+            })
+            
+        return header_entropy, middle_entropy, footer_entropy
+        
+    def _create_detection_features(self, header_entropy, middle_entropy, footer_entropy, file_size):
+        """创建用于算法检测的特征集"""
+        return {
+            "header_entropy": header_entropy,
+            "middle_entropy": middle_entropy,
+            "footer_entropy": footer_entropy,
+            "file_size": file_size,
+            "header_contains": {},
+            "content_contains": {},
+            "iv_at_start": False,
+            "iv_absent": False,
+            "has_nonce": False
+        }
+    
+    def _check_algorithm_patterns(self, features, header, middle_sample, footer, entropy_analyzer, result):
+        """根据特征检查算法模式"""
+        pattern_matches = []
+        
+        try:
+            for algo, patterns in self.algorithm_patterns.items():
+                for pattern in patterns:
+                    pattern_result = {
+                        "algorithm": algo,
+                        "pattern": str(pattern),
+                        "matched": False,
+                        "confidence": pattern.get("confidence", 0)
+                    }
+                    
+                    try:
+                        # 检查头部包含模式
+                        if "header_contains" in pattern:
+                            self._check_header_pattern(pattern, header, features, result, algo, pattern_result)
+                        
+                        # 检查内容包含模式
+                        if "content_contains" in pattern:
+                            self._check_content_pattern(pattern, header, middle_sample, footer, features, result, algo, pattern_result)
+                        
+                        # 检查IV特征
+                        if "iv_at_start" in pattern and pattern["iv_at_start"]:
+                            self._check_iv_characteristics(pattern, header, entropy_analyzer, features, result, algo, pattern_result)
+                        
+                        # 收集匹配的模式
+                        if pattern_result["matched"]:
+                            pattern_matches.append(pattern_result)
+                            
+                    except Exception as e:
+                        result["warnings"].append({
+                            "type": "pattern_check_warning",
+                            "message": f"处理算法 {algo} 的模式时出错: {e}",
+                            "severity": "low",
+                            "details": {
+                                "exception_type": type(e).__name__,
+                                "algorithm": algo,
+                                "pattern": str(pattern)
+                            }
+                        })
+                        continue
+        except Exception as e:
+            result["warnings"].append({
+                "type": "algorithm_pattern_warning",
+                "message": f"算法模式匹配过程中出错: {e}",
+                "severity": "medium",
+                "details": {"exception_type": type(e).__name__}
+            })
+        
+        # 添加模式匹配结果到分析数据
+        result["analysis"]["pattern_matches"] = pattern_matches
+    
+    def _check_header_pattern(self, pattern, header, features, result, algo, pattern_result):
+        """检查头部包含模式"""
+        try:
+            marker = pattern["header_contains"]
+            if marker and header and marker in header:
+                features["header_contains"][marker] = True
+                pattern_result["matched"] = True
+                pattern_result["match_type"] = "header_contains"
+                pattern_result["marker"] = str(marker)
+                
+                # 更新结果（如果置信度更高）
+                if pattern["confidence"] > result["confidence"]:
+                    result["algorithm"] = algo
+                    result["confidence"] = pattern["confidence"]
+                    result["analysis"]["detected_by"] = "header_pattern"
+        except Exception as e:
+            pattern_result["error"] = str(e)
+            raise
+    
+    def _check_content_pattern(self, pattern, header, middle_sample, footer, features, result, algo, pattern_result):
+        """检查内容包含模式"""
+        try:
+            marker = pattern["content_contains"]
+            if marker and (
+                (header and marker in header) or 
+                (middle_sample and marker in middle_sample) or
+                (footer and marker in footer)
+            ):
+                features["content_contains"][marker] = True
+                pattern_result["matched"] = True
+                pattern_result["match_type"] = "content_contains"
+                pattern_result["marker"] = str(marker)
+                
+                # 标记在哪发现了匹配
+                locations = []
+                if header and marker in header:
+                    locations.append("header")
+                if middle_sample and marker in middle_sample:
+                    locations.append("middle")
+                if footer and marker in footer:
+                    locations.append("footer")
+                pattern_result["locations"] = locations
+                
+                # 更新结果（如果置信度更高）
+                if pattern["confidence"] > result["confidence"]:
+                    result["algorithm"] = algo
+                    result["confidence"] = pattern["confidence"]
+                    result["analysis"]["detected_by"] = "content_pattern"
+        except Exception as e:
+            pattern_result["error"] = str(e)
+            raise
+    
+    def _check_iv_characteristics(self, pattern, header, entropy_analyzer, features, result, algo, pattern_result):
+        """检查IV特征"""
+        try:
+            iv_size = pattern.get("iv_size", 16)
+            # 检查前几个字节是否可能是IV（高熵值）
+            if len(header) >= iv_size:
+                iv_block = header[:iv_size]
+                iv_entropy = entropy_analyzer.calculate_entropy(iv_block)
+                pattern_result["iv_entropy"] = iv_entropy
+                
+                if iv_entropy > 7.0:
+                    features["iv_at_start"] = True
+                    result["params"]["iv_in_file"] = True
+                    result["params"]["iv_offset"] = 0
+                    result["params"]["iv_size"] = iv_size
+                    
+                    pattern_result["matched"] = True
+                    pattern_result["match_type"] = "iv_at_start"
+                    
+                    # 更新结果（如果置信度更高）
+                    if pattern["confidence"] > result["confidence"]:
+                        result["algorithm"] = algo
+                        result["confidence"] = pattern["confidence"]
+                        result["analysis"]["detected_by"] = "iv_characteristics"
+        except Exception as e:
+            pattern_result["error"] = str(e)
+            raise
+    
+    def _add_block_size_parameters(self, result):
+        """添加块大小参数"""
+        algorithm = result["algorithm"]
+        
+        if "aes" in algorithm:
+            # AES使用16字节块大小
+            result["params"]["block_size"] = 16
+        elif algorithm == "chacha20":
+            # ChaCha20块大小是64字节
+            result["params"]["block_size"] = 64
+        elif algorithm == "salsa20":
+            # Salsa20块大小是64字节
+            result["params"]["block_size"] = 64
+    
+    def _detect_header_size(self, encrypted_file, file_size, header_entropy, entropy_analyzer, result):
+        """尝试检测文件头大小"""
+        try:
+            # 尝试通过扫描熵变化来检测头部
+            for offset in [8, 16, 32, 64, 128, 256]:
+                if offset >= file_size:
+                    break
+                
+                try:
+                    # 读取偏移后的数据
+                    post_header = b""
+                    try:
+                        with open(encrypted_file, 'rb') as f:
+                            f.seek(offset)
+                            post_header = f.read(256)
+                    except Exception as e:
+                        result["warnings"].append({
+                            "type": "header_detection_warning",
+                            "message": f"读取偏移 {offset} 处的数据时出错: {e}",
+                            "severity": "low",
+                            "details": {"exception_type": type(e).__name__}
+                        })
+                        continue
+                    
+                    # 检查熵变化
+                    if len(post_header) >= 16:
+                        try:
+                            post_header_entropy = entropy_analyzer.calculate_entropy(post_header[:16])
+                            
+                            # 记录熵变化信息
+                            if "entropy_changes" not in result["analysis"]:
+                                result["analysis"]["entropy_changes"] = []
+                                
+                            result["analysis"]["entropy_changes"].append({
+                                "offset": offset,
+                                "entropy": post_header_entropy,
+                                "delta": abs(post_header_entropy - header_entropy)
+                            })
+                            
+                            # 如果熵值在这个偏移处有明显变化，很可能是头部边界
+                            if abs(post_header_entropy - header_entropy) > 1.0:
+                                result["params"]["header_size"] = offset
+                                result["analysis"]["header_detection_method"] = "entropy_jump"
+                                break
+                        except Exception as e:
+                            result["warnings"].append({
+                                "type": "entropy_calculation_warning",
+                                "message": f"计算偏移 {offset} 处的熵值时出错: {e}",
+                                "severity": "low",
+                                "details": {"exception_type": type(e).__name__}
+                            })
+                except Exception as e:
+                    result["warnings"].append({
+                        "type": "header_detection_warning",
+                        "message": f"处理偏移 {offset} 的头部检测时出错: {e}",
+                        "severity": "low",
+                        "details": {"exception_type": type(e).__name__}
+                    })
+        except Exception as e:
+            result["warnings"].append({
+                "type": "header_detection_warning",
+                "message": f"执行头部检测时出错: {e}",
+                "severity": "medium",
+                "details": {"exception_type": type(e).__name__}
+            })
+    
+    def _finalize_metadata(self, result):
+        """完成结果元数据"""
+        result["metadata"]["end_time"] = time.time()
+        result["metadata"]["duration"] = result["metadata"]["end_time"] - result["metadata"]["start_time"]
     
     def calculate_entropy(self, data: bytes) -> float:
         """
