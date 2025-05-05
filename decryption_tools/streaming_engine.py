@@ -1915,97 +1915,202 @@ class StreamingDecryptionEngine:
         Returns:
             Result dictionary
         """
+        # Initialize result dictionary with default error state
+        result = {
+            "success": False,
+            "encrypted_file": encrypted_file,
+            "output_file": output_file,
+            "errors": []
+        }
+        
+        # Verify that the encrypted file exists
+        if not os.path.exists(encrypted_file):
+            result["errors"].append(f"Input file not found: {encrypted_file}")
+            result["error"] = f"Input file not found: {encrypted_file}"
+            return result
+            
+        # Check if we can read the encrypted file
+        if not os.access(encrypted_file, os.R_OK):
+            result["errors"].append(f"Input file not readable: {encrypted_file}")
+            result["error"] = f"Input file not readable: {encrypted_file}"
+            return result
+        
+        # Verify key is present
+        if key is None:
+            result["errors"].append("Decryption key is required")
+            result["error"] = "Decryption key is required"
+            return result
+        
+        # Ensure output directory exists
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                logger.info(f"Created output directory: {output_dir}")
+            except (IOError, OSError, PermissionError) as e:
+                result["errors"].append(f"Cannot create output directory: {e}")
+                result["error"] = f"Cannot create output directory: {e}"
+                return result
+        
+        # Check if output location is writable
+        try:
+            # Attempt to write a test file to check permissions
+            test_file = os.path.join(output_dir, ".test_write_permission")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+        except (IOError, OSError, PermissionError) as e:
+            result["errors"].append(f"Output location not writable: {e}")
+            result["error"] = f"Output location not writable: {e}"
+            return result
+        
+        # Extract parameters
         auto_detect = kwargs.pop("auto_detect", False)
         retry_algorithms = kwargs.pop("retry_algorithms", False)
         
         # Store original parameters for potential retry
         original_kwargs = kwargs.copy()
         
-        # Auto-detect algorithm if requested or if family not provided
-        if auto_detect or not family:
-            logger.info("Using automatic algorithm detection")
-            detection_result = self.algorithm_detector.detect_algorithm(encrypted_file, family)
+        try:
+            # Auto-detect algorithm if requested or if family not provided
+            if auto_detect or not family:
+                logger.info("Using automatic algorithm detection")
+                try:
+                    detection_result = self.algorithm_detector.detect_algorithm(encrypted_file, family)
+                    
+                    # Copy any errors from detection to our result
+                    if "errors" in detection_result and detection_result["errors"]:
+                        result["errors"].extend(detection_result["errors"])
+                    
+                    detected_algorithm = detection_result["algorithm"]
+                    detected_params = detection_result["params"]
+                    confidence = detection_result["confidence"]
+                    
+                    logger.info(f"Detected algorithm: {detected_algorithm} (confidence: {confidence:.2f})")
+                    
+                    # Get algorithm and parameters, using detected values as fallback
+                    try:
+                        algorithm, params = self._get_family_config(family, key, **kwargs)
+                    except Exception as e:
+                        result["errors"].append(f"Error in family configuration: {e}")
+                        # Use detected algorithm as a fallback
+                        algorithm = detected_algorithm
+                        params = {}
+                    
+                    # If confidence is high or no family specified, use detected parameters
+                    if confidence > 0.7 or not family:
+                        # Override with detected parameters, but keep any explicitly specified params
+                        for param_name, param_value in detected_params.items():
+                            if param_name not in kwargs:
+                                params[param_name] = param_value
+                        
+                        # Use detected algorithm if no family specified or detection is very confident
+                        if not family or confidence > 0.85:
+                            algorithm = detected_algorithm
+                            
+                except Exception as e:
+                    # If algorithm detection fails, log the error and use defaults
+                    result["errors"].append(f"Algorithm detection failed: {e}")
+                    logger.error(f"Algorithm detection failed: {e}")
+                    algorithm = "aes-cbc"  # Default algorithm as fallback
+                    params = {}
+            else:
+                # Get algorithm and parameters using family-based approach
+                try:
+                    algorithm, params = self._get_family_config(family, key, **kwargs)
+                except Exception as e:
+                    result["errors"].append(f"Error in family configuration: {e}")
+                    logger.error(f"Error getting family configuration: {e}")
+                    algorithm = "aes-cbc"  # Default
+                    params = {}
             
-            detected_algorithm = detection_result["algorithm"]
-            detected_params = detection_result["params"]
-            confidence = detection_result["confidence"]
+            # Apply our defaults
+            params["validation_level"] = kwargs.get("validation_level", self.validation_level)
+            params["use_threading"] = kwargs.get("use_threading", self.use_threading)
+            params["chunk_size"] = kwargs.get("chunk_size", self.chunk_size)
             
-            logger.info(f"Detected algorithm: {detected_algorithm} (confidence: {confidence:.2f})")
+            # Call decryptor
+            try:
+                decrypt_result = self.decryptor.decrypt_file(encrypted_file, output_file, algorithm, key, **params)
+                
+                # Merge the decryptor result with our result
+                result.update(decrypt_result)
+                
+                # Ensure errors are propagated
+                if "errors" in decrypt_result and decrypt_result["errors"]:
+                    if "errors" not in result:
+                        result["errors"] = []
+                    result["errors"].extend(decrypt_result["errors"])
+                
+            except Exception as e:
+                result["errors"].append(f"Decryption error: {e}")
+                result["error"] = f"Decryption error: {e}"
+                result["success"] = False
             
-            # Get algorithm and parameters, using detected values as fallback
-            algorithm, params = self._get_family_config(family, key, **kwargs)
+            # If decryption failed and retry_algorithms is enabled, try alternative algorithms
+            if not result.get("success", False) and retry_algorithms:
+                # Define alternative algorithms to try based on initial algorithm
+                alternatives = {
+                    "aes-cbc": ["aes-ecb", "chacha20", "salsa20"],
+                    "aes-ecb": ["aes-cbc", "chacha20", "salsa20"],
+                    "chacha20": ["salsa20", "aes-cbc", "aes-ecb"],
+                    "salsa20": ["chacha20", "aes-cbc", "aes-ecb"]
+                }
+                
+                # Get alternatives for our algorithm
+                alt_algorithms = alternatives.get(algorithm, [])
+                
+                # Try each alternative
+                for alt_algorithm in alt_algorithms:
+                    logger.info(f"Retrying with alternative algorithm: {alt_algorithm}")
+                    
+                    # Reset params to original kwargs
+                    params = original_kwargs.copy()
+                    
+                    # Apply our defaults
+                    params["validation_level"] = original_kwargs.get("validation_level", self.validation_level)
+                    params["use_threading"] = original_kwargs.get("use_threading", self.use_threading)
+                    params["chunk_size"] = original_kwargs.get("chunk_size", self.chunk_size)
+                    
+                    # Add algorithm-specific params
+                    if alt_algorithm == "aes-cbc":
+                        params["iv_in_file"] = params.get("iv_in_file", True)
+                        params["iv_offset"] = params.get("iv_offset", 0)
+                        params["iv_size"] = params.get("iv_size", 16)
+                    elif alt_algorithm == "chacha20":
+                        params["nonce"] = params.get("nonce", None)
+                    elif alt_algorithm == "salsa20":
+                        params["nonce"] = params.get("nonce", None)
+                    
+                    # Try with the alternative algorithm
+                    try:
+                        alt_result = self.decryptor.decrypt_file(encrypted_file, output_file, alt_algorithm, key, **params)
+                        
+                        # Merge any errors from the alternative attempt
+                        if "errors" in alt_result and alt_result["errors"]:
+                            result["errors"].extend(alt_result["errors"])
+                        
+                        # If successful, use this result
+                        if alt_result.get("success", False):
+                            logger.info(f"Alternative algorithm {alt_algorithm} succeeded")
+                            result.update(alt_result)
+                            result["algorithm"] = alt_algorithm  # Make sure algorithm is recorded
+                            result["algorithm_retry"] = True
+                            break
+                    except Exception as e:
+                        result["errors"].append(f"Alternative algorithm {alt_algorithm} error: {e}")
+                        # Continue to the next algorithm
             
-            # If confidence is high or no family specified, use detected parameters
-            if confidence > 0.7 or not family:
-                # Override with detected parameters, but keep any explicitly specified params
-                for param_name, param_value in detected_params.items():
-                    if param_name not in kwargs:
-                        params[param_name] = param_value
-                
-                # Use detected algorithm if no family specified or detection is very confident
-                if not family or confidence > 0.85:
-                    algorithm = detected_algorithm
-        else:
-            # Get algorithm and parameters using family-based approach
-            algorithm, params = self._get_family_config(family, key, **kwargs)
-        
-        # Apply our defaults
-        params["validation_level"] = kwargs.get("validation_level", self.validation_level)
-        params["use_threading"] = kwargs.get("use_threading", self.use_threading)
-        params["chunk_size"] = kwargs.get("chunk_size", self.chunk_size)
-        
-        # Call decryptor
-        result = self.decryptor.decrypt_file(encrypted_file, output_file, algorithm, key, **params)
-        
-        # If decryption failed and retry_algorithms is enabled, try alternative algorithms
-        if not result.get("success", False) and retry_algorithms:
-            # Define alternative algorithms to try based on initial algorithm
-            alternatives = {
-                "aes-cbc": ["aes-ecb", "chacha20", "salsa20"],
-                "aes-ecb": ["aes-cbc", "chacha20", "salsa20"],
-                "chacha20": ["salsa20", "aes-cbc", "aes-ecb"],
-                "salsa20": ["chacha20", "aes-cbc", "aes-ecb"]
-            }
+            # Include algorithm information in the result
+            result["algorithm"] = algorithm
+            result["family"] = family
             
-            # Get alternatives for our algorithm
-            alt_algorithms = alternatives.get(algorithm, [])
-            
-            # Try each alternative
-            for alt_algorithm in alt_algorithms:
-                logger.info(f"Retrying with alternative algorithm: {alt_algorithm}")
-                
-                # Reset params to original kwargs
-                params = original_kwargs.copy()
-                
-                # Apply our defaults
-                params["validation_level"] = original_kwargs.get("validation_level", self.validation_level)
-                params["use_threading"] = original_kwargs.get("use_threading", self.use_threading)
-                params["chunk_size"] = original_kwargs.get("chunk_size", self.chunk_size)
-                
-                # Add algorithm-specific params
-                if alt_algorithm == "aes-cbc":
-                    params["iv_in_file"] = params.get("iv_in_file", True)
-                    params["iv_offset"] = params.get("iv_offset", 0)
-                    params["iv_size"] = params.get("iv_size", 16)
-                elif alt_algorithm == "chacha20":
-                    params["nonce"] = params.get("nonce", None)
-                elif alt_algorithm == "salsa20":
-                    params["nonce"] = params.get("nonce", None)
-                
-                # Try with the alternative algorithm
-                alt_result = self.decryptor.decrypt_file(encrypted_file, output_file, alt_algorithm, key, **params)
-                
-                # If successful, use this result
-                if alt_result.get("success", False):
-                    logger.info(f"Alternative algorithm {alt_algorithm} succeeded")
-                    result = alt_result
-                    result["algorithm"] = alt_algorithm  # Make sure algorithm is recorded
-                    result["algorithm_retry"] = True
-                    break
-        
-        # Include algorithm information in the result
-        result["algorithm"] = algorithm
-        result["family"] = family
+        except Exception as e:
+            # Catch-all for any unforeseen errors
+            result["errors"].append(f"Unexpected error in decrypt_file: {e}")
+            result["error"] = f"Unexpected error: {e}"
+            result["success"] = False
+            logger.error(f"Unexpected error in decrypt_file: {e}", exc_info=True)
         
         return result
     
@@ -2018,18 +2123,163 @@ class StreamingDecryptionEngine:
             family: Ransomware family name
             key: Decryption key
             **kwargs: Additional decryption parameters
+                auto_detect: Whether to automatically detect the encryption algorithm
+                retry_algorithms: Whether to try multiple algorithms if first attempt fails
             
         Returns:
             Result dictionary with decrypted data
         """
-        # Get algorithm and parameters for family
-        algorithm, params = self._get_family_config(family, key, **kwargs)
+        # Initialize result dictionary with default error state
+        result = {
+            "success": False,
+            "data_size": len(data) if data else 0,
+            "errors": []
+        }
         
-        # Apply our defaults
-        params["validation_level"] = kwargs.get("validation_level", self.validation_level)
+        # Validate inputs
+        if data is None or len(data) == 0:
+            result["errors"].append("Empty data provided for decryption")
+            result["error"] = "Empty data provided for decryption"
+            return result
+            
+        if key is None:
+            result["errors"].append("Decryption key is required")
+            result["error"] = "Decryption key is required"
+            return result
         
-        # Call decryptor
-        return self.decryptor.decrypt_data(data, algorithm, key, **params)
+        # Extract parameters
+        auto_detect = kwargs.pop("auto_detect", False)
+        retry_algorithms = kwargs.pop("retry_algorithms", False)
+        
+        # Store original parameters for potential retry
+        original_kwargs = kwargs.copy()
+        
+        try:
+            # Auto-detect algorithm if requested
+            if auto_detect:
+                logger.info("Using automatic algorithm detection for in-memory data")
+                
+                # Use a simplified detection for in-memory data
+                # Since we can't use file-based detection, fallback to family-based approach
+                if family:
+                    try:
+                        # Get algorithm and parameters based on family
+                        algorithm, params = self._get_family_config(family, key, **kwargs)
+                    except Exception as e:
+                        result["errors"].append(f"Error in family configuration: {e}")
+                        logger.error(f"Error getting family configuration: {e}")
+                        algorithm = "aes-cbc"  # Default
+                        params = {}
+                else:
+                    # Without family and file, we have to guess the algorithm
+                    # We'll default to AES-CBC as the most common
+                    result["errors"].append("No family specified and auto-detection requires a file. Using AES-CBC as default.")
+                    algorithm = "aes-cbc"
+                    params = {}
+            else:
+                # Use family-based approach
+                try:
+                    # Normalize family if provided
+                    if family is not None:
+                        try:
+                            family = family.lower()
+                        except (AttributeError, TypeError) as e:
+                            result["errors"].append(f"Invalid family name: {e}")
+                            family = None
+                    
+                    # Get algorithm and parameters
+                    algorithm, params = self._get_family_config(family, key, **kwargs)
+                except Exception as e:
+                    result["errors"].append(f"Error in family configuration: {e}")
+                    logger.error(f"Error getting family configuration: {e}")
+                    algorithm = "aes-cbc"  # Default
+                    params = {}
+            
+            # Apply our defaults
+            params["validation_level"] = kwargs.get("validation_level", self.validation_level)
+            
+            # Call decryptor
+            try:
+                decrypt_result = self.decryptor.decrypt_data(data, algorithm, key, **params)
+                
+                # Merge the decryptor result with our result
+                result.update(decrypt_result)
+                
+                # Ensure errors are propagated
+                if "errors" in decrypt_result and decrypt_result["errors"]:
+                    if "errors" not in result:
+                        result["errors"] = []
+                    result["errors"].extend(decrypt_result["errors"])
+                
+            except Exception as e:
+                result["errors"].append(f"Decryption error: {e}")
+                result["error"] = f"Decryption error: {e}"
+                result["success"] = False
+            
+            # If decryption failed and retry_algorithms is enabled, try alternative algorithms
+            if not result.get("success", False) and retry_algorithms:
+                # Define alternative algorithms to try based on initial algorithm
+                alternatives = {
+                    "aes-cbc": ["aes-ecb", "chacha20", "salsa20"],
+                    "aes-ecb": ["aes-cbc", "chacha20", "salsa20"],
+                    "chacha20": ["salsa20", "aes-cbc", "aes-ecb"],
+                    "salsa20": ["chacha20", "aes-cbc", "aes-ecb"]
+                }
+                
+                # Get alternatives for our algorithm
+                alt_algorithms = alternatives.get(algorithm, [])
+                
+                # Try each alternative
+                for alt_algorithm in alt_algorithms:
+                    logger.info(f"Retrying with alternative algorithm: {alt_algorithm}")
+                    
+                    # Reset params to original kwargs
+                    params = original_kwargs.copy()
+                    
+                    # Apply our defaults
+                    params["validation_level"] = original_kwargs.get("validation_level", self.validation_level)
+                    
+                    # Add algorithm-specific params
+                    if alt_algorithm == "aes-cbc":
+                        # For data decryption, we likely don't have IV in the data
+                        # So we'll use default zeros or user-provided IV
+                        params["iv"] = kwargs.get("iv", b'\0' * 16)
+                    elif alt_algorithm == "chacha20":
+                        params["nonce"] = kwargs.get("nonce", None)
+                    elif alt_algorithm == "salsa20":
+                        params["nonce"] = kwargs.get("nonce", None)
+                    
+                    # Try with the alternative algorithm
+                    try:
+                        alt_result = self.decryptor.decrypt_data(data, alt_algorithm, key, **params)
+                        
+                        # Merge any errors from the alternative attempt
+                        if "errors" in alt_result and alt_result["errors"]:
+                            result["errors"].extend(alt_result["errors"])
+                        
+                        # If successful, use this result
+                        if alt_result.get("success", False):
+                            logger.info(f"Alternative algorithm {alt_algorithm} succeeded")
+                            result.update(alt_result)
+                            result["algorithm"] = alt_algorithm
+                            result["algorithm_retry"] = True
+                            break
+                    except Exception as e:
+                        result["errors"].append(f"Alternative algorithm {alt_algorithm} error: {e}")
+                        # Continue to the next algorithm
+            
+            # Include algorithm information in the result
+            result["algorithm"] = algorithm
+            result["family"] = family
+            
+        except Exception as e:
+            # Catch-all for any unforeseen errors
+            result["errors"].append(f"Unexpected error in decrypt_data: {e}")
+            result["error"] = f"Unexpected error: {e}"
+            result["success"] = False
+            logger.error(f"Unexpected error in decrypt_data: {e}", exc_info=True)
+        
+        return result
     
     def batch_decrypt(self, file_list: List[str], output_dir: str, family: Optional[str] = None,
                      key: bytes = None, **kwargs) -> Dict[str, Any]:
@@ -2078,87 +2328,152 @@ class StreamingDecryptionEngine:
         
         # Function to process a single file (for both sequential and parallel execution)
         def process_file(file_path):
-            file_name = os.path.basename(file_path)
-            output_path = os.path.join(output_dir, file_name + ".decrypted")
-            
-            # Create a copy of kwargs for this file
-            file_kwargs = kwargs.copy()
-            
-            # If we have adaptive parameters and have learned from successful decryptions
-            if adaptive_params and successful_params:
-                # Use adaptation based on file extension or characteristics
-                file_ext = os.path.splitext(file_path)[1].lower()
+            try:
+                # Validate file existence and readability
+                if not os.path.exists(file_path):
+                    return {
+                        "input": file_path,
+                        "success": False,
+                        "error": f"File not found: {file_path}",
+                        "errors": [f"File not found: {file_path}"]
+                    }
                 
-                # If we have success parameters for this extension, use them
-                if file_ext in successful_params:
-                    adaptive_algo, adaptive_params = successful_params[file_ext]
+                if not os.access(file_path, os.R_OK):
+                    return {
+                        "input": file_path,
+                        "success": False,
+                        "error": f"File not readable: {file_path}",
+                        "errors": [f"File not readable: {file_path}"]
+                    }
+                
+                # Generate output path
+                try:
+                    file_name = os.path.basename(file_path)
+                    output_path = os.path.join(output_dir, file_name + ".decrypted")
+                except Exception as e:
+                    return {
+                        "input": file_path,
+                        "success": False,
+                        "error": f"Error generating output path: {e}",
+                        "errors": [f"Error generating output path: {e}"]
+                    }
+                
+                # Create a copy of kwargs for this file
+                file_kwargs = kwargs.copy()
+                
+                # If we have adaptive parameters and have learned from successful decryptions
+                if adaptive_params and successful_params:
+                    try:
+                        # Use adaptation based on file extension or characteristics
+                        file_ext = os.path.splitext(file_path)[1].lower()
+                        
+                        # If we have success parameters for this extension, use them
+                        if file_ext in successful_params:
+                            adaptive_algo, adaptive_params = successful_params[file_ext]
+                            
+                            # Combine with original kwargs, but don't override explicit settings
+                            for param_name, param_value in adaptive_params.items():
+                                if param_name not in file_kwargs:
+                                    file_kwargs[param_name] = param_value
+                            
+                            # Only override algorithm if auto_detect is True or no family specified
+                            if auto_detect or not family:
+                                file_kwargs["algorithm"] = adaptive_algo
+                        
+                        # Flag that we are using adaptive parameters
+                        file_kwargs["using_adaptive_params"] = True
+                    except Exception as e:
+                        logger.warning(f"Error applying adaptive parameters for {file_path}: {e}")
+                        # Continue without adaptive params
+                
+                # Decrypt file
+                try:
+                    result = self.decrypt_file(
+                        file_path, 
+                        output_path, 
+                        family, 
+                        key, 
+                        auto_detect=auto_detect,
+                        retry_algorithms=retry_algorithms,
+                        **file_kwargs
+                    )
+                except Exception as e:
+                    return {
+                        "input": file_path,
+                        "output": output_path,
+                        "success": False,
+                        "error": f"Unexpected error in decrypt_file: {e}",
+                        "errors": [f"Unexpected error in decrypt_file: {e}"]
+                    }
+                
+                # If successful, learn from this for future files
+                if adaptive_params and result.get("success", False):
+                    try:
+                        file_ext = os.path.splitext(file_path)[1].lower()
+                        
+                        # Extract successful parameters
+                        params_to_save = {}
+                        for k in ["header_size", "iv_in_file", "iv_offset", "iv_size", 
+                                 "nonce_size", "block_size"]:
+                            if k in result:
+                                params_to_save[k] = result[k]
+                        
+                        # Store the successful algorithm and parameters for this extension
+                        successful_params[file_ext] = (
+                            result.get("algorithm", ""),
+                            params_to_save
+                        )
+                    except Exception as e:
+                        logger.warning(f"Error saving adaptive parameters for {file_path}: {e}")
+                        # Continue without saving adaptive params
+                
+                # Track algorithm success
+                try:
+                    algorithm = result.get("algorithm", "unknown")
+                    if algorithm not in results["detected_algorithms"]:
+                        results["detected_algorithms"][algorithm] = 0
+                    results["detected_algorithms"][algorithm] += 1
                     
-                    # Combine with original kwargs, but don't override explicit settings
-                    for param_name, param_value in adaptive_params.items():
-                        if param_name not in file_kwargs:
-                            file_kwargs[param_name] = param_value
-                    
-                    # Only override algorithm if auto_detect is True or no family specified
-                    if auto_detect or not family:
-                        file_kwargs["algorithm"] = adaptive_algo
+                    if algorithm not in results["algorithm_success_rate"]:
+                        results["algorithm_success_rate"][algorithm] = {"attempts": 0, "successes": 0}
+                    results["algorithm_success_rate"][algorithm]["attempts"] += 1
+                    if result.get("success", False):
+                        results["algorithm_success_rate"][algorithm]["successes"] += 1
+                except Exception as e:
+                    logger.warning(f"Error tracking algorithm statistics: {e}")
+                    # Continue without updating stats
                 
-                # Flag that we are using adaptive parameters
-                file_kwargs["using_adaptive_params"] = True
-            
-            # Decrypt file
-            result = self.decrypt_file(
-                file_path, 
-                output_path, 
-                family, 
-                key, 
-                auto_detect=auto_detect,
-                retry_algorithms=retry_algorithms,
-                **file_kwargs
-            )
-            
-            # If successful, learn from this for future files
-            if adaptive_params and result.get("success", False):
-                file_ext = os.path.splitext(file_path)[1].lower()
+                # Create file result
+                file_result = {
+                    "input": file_path,
+                    "output": output_path,
+                    "success": result.get("success", False),
+                    "error": result.get("error"),
+                    "algorithm": result.get("algorithm", "unknown")
+                }
                 
-                # Store the successful algorithm and parameters for this extension
-                successful_params[file_ext] = (
-                    result.get("algorithm", ""),
-                    {k: v for k, v in result.items() if k in [
-                        "header_size", "iv_in_file", "iv_offset", "iv_size", 
-                        "nonce_size", "block_size"
-                    ]}
-                )
-            
-            # Track algorithm success
-            algorithm = result.get("algorithm", "unknown")
-            if algorithm not in results["detected_algorithms"]:
-                results["detected_algorithms"][algorithm] = 0
-            results["detected_algorithms"][algorithm] += 1
-            
-            if algorithm not in results["algorithm_success_rate"]:
-                results["algorithm_success_rate"][algorithm] = {"attempts": 0, "successes": 0}
-            results["algorithm_success_rate"][algorithm]["attempts"] += 1
-            if result.get("success", False):
-                results["algorithm_success_rate"][algorithm]["successes"] += 1
-            
-            # Create file result
-            file_result = {
-                "input": file_path,
-                "output": output_path,
-                "success": result.get("success", False),
-                "error": result.get("error"),
-                "algorithm": algorithm
-            }
-            
-            # Add adaptive info if relevant
-            if "using_adaptive_params" in file_kwargs:
-                file_result["used_adaptive_params"] = True
-            
-            # Add algorithm retry info if relevant
-            if result.get("algorithm_retry", False):
-                file_result["algorithm_retry"] = True
-            
-            return file_result
+                # Add errors if present
+                if "errors" in result and result["errors"]:
+                    file_result["errors"] = result["errors"]
+                
+                # Add adaptive info if relevant
+                if "using_adaptive_params" in file_kwargs:
+                    file_result["used_adaptive_params"] = True
+                
+                # Add algorithm retry info if relevant
+                if result.get("algorithm_retry", False):
+                    file_result["algorithm_retry"] = True
+                
+                return file_result
+                
+            except Exception as e:
+                # Catch-all for any unexpected errors in the processing function
+                return {
+                    "input": file_path,
+                    "success": False,
+                    "error": f"Unexpected error processing file: {e}",
+                    "errors": [f"Unexpected error processing file: {e}"]
+                }
         
         # Choose between parallel and sequential processing
         if parallel and len(file_list) > 1:
