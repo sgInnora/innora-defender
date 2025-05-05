@@ -1378,88 +1378,160 @@ class AlgorithmDetector:
         Returns:
             Dictionary with detected algorithm and parameters
         """
+        # Initialize result with defaults
         result = {
             "algorithm": "aes-cbc",  # Default fallback
             "confidence": 0.0,
-            "params": {}
+            "params": {},
+            "errors": []  # Track errors during detection process
         }
         
-        # If family is known, use predefined mapping with high confidence
+        # Handle known family if provided
         if known_family:
-            family = known_family.lower()
-            if family in self.family_algorithm_map:
-                result["algorithm"] = self.family_algorithm_map[family]
-                result["confidence"] = 0.85
-                result["params"]["family_match"] = True
-                result["family"] = family
-                return result
+            try:
+                family = known_family.lower()
+                if family in self.family_algorithm_map:
+                    result["algorithm"] = self.family_algorithm_map[family]
+                    result["confidence"] = 0.85
+                    result["params"]["family_match"] = True
+                    result["family"] = family
+                    return result
+            except (AttributeError, TypeError) as e:
+                result["errors"].append(f"Invalid family name: {e}")
+        
+        # Check if file exists
+        if not os.path.exists(encrypted_file):
+            result["errors"].append(f"File not found: {encrypted_file}")
+            return result
+            
+        # Check if file is accessible
+        if not os.access(encrypted_file, os.R_OK):
+            result["errors"].append(f"File not readable: {encrypted_file}")
+            return result
         
         # Check if file extension matches known ransomware families
-        file_ext = os.path.splitext(encrypted_file)[1].lower()
-        if file_ext in self.family_extensions:
-            detected_family = self.family_extensions[file_ext]
-            result["algorithm"] = self.family_algorithm_map.get(detected_family, result["algorithm"])
-            result["confidence"] = 0.75  # Good confidence but not as high as explicit family
-            result["params"]["extension_match"] = True
-            result["family"] = detected_family
-            
-            # We'll continue with the analysis to potentially improve confidence
+        try:
+            file_ext = os.path.splitext(encrypted_file)[1].lower()
+            if file_ext in self.family_extensions:
+                detected_family = self.family_extensions[file_ext]
+                result["algorithm"] = self.family_algorithm_map.get(detected_family, result["algorithm"])
+                result["confidence"] = 0.75  # Good confidence but not as high as explicit family
+                result["params"]["extension_match"] = True
+                result["family"] = detected_family
+                
+                # We'll continue with the analysis to potentially improve confidence
+        except Exception as e:
+            result["errors"].append(f"Error processing file extension: {e}")
         
         try:
             # Check file characteristics
-            file_size = os.path.getsize(encrypted_file)
+            try:
+                file_size = os.path.getsize(encrypted_file)
+            except (OSError, IOError) as e:
+                result["errors"].append(f"Error getting file size: {e}")
+                return result
             
             # Skip very small files
             if file_size < 100:
+                result["params"]["too_small"] = True
                 return result
                 
-            with open(encrypted_file, 'rb') as f:
-                # Read header and sample from middle
-                header = f.read(min(512, file_size))
-                
-                # Read a sample from the middle of the file
-                if file_size > 1024:
-                    f.seek(file_size // 2)
-                    middle_sample = f.read(min(512, file_size - file_size // 2))
-                else:
-                    middle_sample = b""
-                    
-                # For large files, get footer as well
-                footer = b""
-                if file_size > 1024:
-                    f.seek(max(0, file_size - 512))
-                    footer = f.read(512)
+            # Read file samples safely
+            header = b""
+            middle_sample = b""
+            footer = b""
             
-            # Check for file signatures
-            for offset, signature, family, confidence in self.file_signatures:
-                if offset < len(header) and signature in header[offset:offset+len(signature)]:
-                    # Found a signature match
-                    algorithm = self.family_algorithm_map.get(family, result["algorithm"])
+            try:
+                with open(encrypted_file, 'rb') as f:
+                    # Read header
+                    header = f.read(min(512, file_size))
                     
-                    # Only update if confidence is higher
-                    if confidence > result["confidence"]:
-                        result["algorithm"] = algorithm
-                        result["confidence"] = confidence
-                        result["params"]["signature_match"] = True
-                        result["params"]["detected_family"] = family
-                        result["family"] = family
+                    # Read a sample from the middle of the file
+                    if file_size > 1024:
+                        try:
+                            f.seek(file_size // 2)
+                            middle_sample = f.read(min(512, file_size - file_size // 2))
+                        except (OSError, IOError) as e:
+                            result["errors"].append(f"Error reading middle of file: {e}")
+                    
+                    # For large files, get footer as well
+                    if file_size > 1024:
+                        try:
+                            f.seek(max(0, file_size - 512))
+                            footer = f.read(512)
+                        except (OSError, IOError) as e:
+                            result["errors"].append(f"Error reading end of file: {e}")
+            except (IOError, OSError, PermissionError) as e:
+                result["errors"].append(f"Error opening file: {e}")
+                return result
+            
+            # Check for file signatures with improved error handling
+            try:
+                for offset, signature, family, confidence in self.file_signatures:
+                    # Skip if header is too short for this signature check
+                    if len(header) <= offset:
+                        continue
+                        
+                    try:
+                        # Safely check for signature
+                        if signature in header[offset:offset+len(signature)]:
+                            # Found a signature match
+                            algorithm = self.family_algorithm_map.get(family, result["algorithm"])
+                            
+                            # Only update if confidence is higher
+                            if confidence > result["confidence"]:
+                                result["algorithm"] = algorithm
+                                result["confidence"] = confidence
+                                result["params"]["signature_match"] = True
+                                result["params"]["detected_family"] = family
+                                result["family"] = family
+                    except (IndexError, TypeError) as e:
+                        result["errors"].append(f"Error checking signature {signature!r} at offset {offset}: {e}")
+            except Exception as e:
+                result["errors"].append(f"Error during signature checking: {e}")
             
             # If we already have high confidence, add family-specific parameters and return
             if result["confidence"] > 0.9 and result.get("family"):
                 self._add_family_specific_params(result)
                 return result
                 
-            # Calculate entropy of samples
+            # Calculate entropy of samples with improved error handling
+            entropy_analyzer = None
             try:
-                from tools.crypto.entropy.entropy_analyzer import EntropyAnalyzer
-                entropy_analyzer = EntropyAnalyzer()
-            except ImportError:
-                # Fallback to our local entropy calculation
-                entropy_analyzer = self
+                try:
+                    from tools.crypto.entropy.entropy_analyzer import EntropyAnalyzer
+                    entropy_analyzer = EntropyAnalyzer()
+                except ImportError:
+                    # Fallback to our local entropy calculation
+                    entropy_analyzer = self
+                    result["errors"].append("External entropy analyzer not available, using internal implementation")
+            except Exception as e:
+                result["errors"].append(f"Error loading entropy analyzer: {e}")
+                # If both external and internal entropy analyzers fail, create a dummy one to avoid failures
+                class DummyEntropyAnalyzer:
+                    def calculate_entropy(self, data):
+                        return 5.0  # Return a middle-of-the-road value
+                entropy_analyzer = DummyEntropyAnalyzer()
                 
-            header_entropy = entropy_analyzer.calculate_entropy(header)
-            middle_entropy = entropy_analyzer.calculate_entropy(middle_sample) if middle_sample else 0
-            footer_entropy = entropy_analyzer.calculate_entropy(footer) if footer else 0
+            # Calculate entropy with error handling for each sample
+            header_entropy = 0
+            middle_entropy = 0
+            footer_entropy = 0
+            
+            try:
+                header_entropy = entropy_analyzer.calculate_entropy(header)
+            except Exception as e:
+                result["errors"].append(f"Error calculating header entropy: {e}")
+                
+            try:
+                middle_entropy = entropy_analyzer.calculate_entropy(middle_sample) if middle_sample else 0
+            except Exception as e:
+                result["errors"].append(f"Error calculating middle sample entropy: {e}")
+                
+            try:
+                footer_entropy = entropy_analyzer.calculate_entropy(footer) if footer else 0
+            except Exception as e:
+                result["errors"].append(f"Error calculating footer entropy: {e}")
             
             # Check if data is encrypted based on entropy
             is_encrypted = header_entropy > self.entropy_threshold
@@ -1481,50 +1553,71 @@ class AlgorithmDetector:
                 "has_nonce": False
             }
             
-            # Check for algorithm-specific markers
-            for algo, patterns in self.algorithm_patterns.items():
-                for pattern in patterns:
-                    # Check header contains pattern
-                    if "header_contains" in pattern:
-                        marker = pattern["header_contains"]
-                        if marker in header:
-                            features["header_contains"][marker] = True
+            # Check for algorithm-specific markers with improved error handling
+            try:
+                for algo, patterns in self.algorithm_patterns.items():
+                    for pattern in patterns:
+                        try:
+                            # Check header contains pattern
+                            if "header_contains" in pattern:
+                                try:
+                                    marker = pattern["header_contains"]
+                                    if marker and header and marker in header:
+                                        features["header_contains"][marker] = True
+                                        
+                                        # Update result if confidence is higher
+                                        if pattern["confidence"] > result["confidence"]:
+                                            result["algorithm"] = algo
+                                            result["confidence"] = pattern["confidence"]
+                                except Exception as e:
+                                    result["errors"].append(f"Error checking header pattern for {algo}: {e}")
                             
-                            # Update result if confidence is higher
-                            if pattern["confidence"] > result["confidence"]:
-                                result["algorithm"] = algo
-                                result["confidence"] = pattern["confidence"]
-                    
-                    # Check content contains pattern
-                    if "content_contains" in pattern:
-                        marker = pattern["content_contains"]
-                        if (marker in header or 
-                            (middle_sample and marker in middle_sample) or
-                            (footer and marker in footer)):
-                            features["content_contains"][marker] = True
+                            # Check content contains pattern
+                            if "content_contains" in pattern:
+                                try:
+                                    marker = pattern["content_contains"]
+                                    if marker and (
+                                        (header and marker in header) or 
+                                        (middle_sample and marker in middle_sample) or
+                                        (footer and marker in footer)
+                                    ):
+                                        features["content_contains"][marker] = True
+                                        
+                                        # Update result if confidence is higher
+                                        if pattern["confidence"] > result["confidence"]:
+                                            result["algorithm"] = algo
+                                            result["confidence"] = pattern["confidence"]
+                                except Exception as e:
+                                    result["errors"].append(f"Error checking content pattern for {algo}: {e}")
                             
-                            # Update result if confidence is higher
-                            if pattern["confidence"] > result["confidence"]:
-                                result["algorithm"] = algo
-                                result["confidence"] = pattern["confidence"]
-                    
-                    # Check IV characteristics
-                    if "iv_at_start" in pattern and pattern["iv_at_start"]:
-                        iv_size = pattern.get("iv_size", 16)
-                        # Check if first iv_size bytes could be an IV (high entropy)
-                        if len(header) >= iv_size:
-                            iv_block = header[:iv_size]
-                            iv_entropy = entropy_analyzer.calculate_entropy(iv_block)
-                            if iv_entropy > 7.0:
-                                features["iv_at_start"] = True
-                                result["params"]["iv_in_file"] = True
-                                result["params"]["iv_offset"] = 0
-                                result["params"]["iv_size"] = iv_size
-                                
-                                # Update result if confidence is higher
-                                if pattern["confidence"] > result["confidence"]:
-                                    result["algorithm"] = algo
-                                    result["confidence"] = pattern["confidence"]
+                            # Check IV characteristics
+                            if "iv_at_start" in pattern and pattern["iv_at_start"]:
+                                try:
+                                    iv_size = pattern.get("iv_size", 16)
+                                    # Check if first iv_size bytes could be an IV (high entropy)
+                                    if len(header) >= iv_size:
+                                        iv_block = header[:iv_size]
+                                        try:
+                                            iv_entropy = entropy_analyzer.calculate_entropy(iv_block)
+                                            if iv_entropy > 7.0:
+                                                features["iv_at_start"] = True
+                                                result["params"]["iv_in_file"] = True
+                                                result["params"]["iv_offset"] = 0
+                                                result["params"]["iv_size"] = iv_size
+                                                
+                                                # Update result if confidence is higher
+                                                if pattern["confidence"] > result["confidence"]:
+                                                    result["algorithm"] = algo
+                                                    result["confidence"] = pattern["confidence"]
+                                        except Exception as e:
+                                            result["errors"].append(f"Error calculating IV entropy for {algo}: {e}")
+                                except Exception as e:
+                                    result["errors"].append(f"Error checking IV characteristics for {algo}: {e}")
+                        except Exception as e:
+                            result["errors"].append(f"Error processing pattern for {algo}: {e}")
+                            continue
+            except Exception as e:
+                result["errors"].append(f"Error during algorithm pattern matching: {e}")
             
             # Handle block size detection
             if "aes" in result["algorithm"]:
@@ -1537,24 +1630,38 @@ class AlgorithmDetector:
                 # Salsa20 block size is 64 bytes
                 result["params"]["block_size"] = 64
             
-            # Add header detection
+            # Add header detection with improved error handling
             if file_size > 256 and "header_size" not in result["params"]:
-                # Try to detect header by scanning for entropy changes
-                for offset in [8, 16, 32, 64, 128, 256]:
-                    if offset >= file_size:
-                        break
-                        
-                    with open(encrypted_file, 'rb') as f:
-                        f.seek(offset)
-                        post_header = f.read(256)
-                        
-                    if len(post_header) >= 16:
-                        post_header_entropy = entropy_analyzer.calculate_entropy(post_header[:16])
-                        
-                        # If entropy jumps at this offset, likely a header boundary
-                        if abs(post_header_entropy - header_entropy) > 1.0:
-                            result["params"]["header_size"] = offset
+                try:
+                    # Try to detect header by scanning for entropy changes
+                    for offset in [8, 16, 32, 64, 128, 256]:
+                        if offset >= file_size:
                             break
+                        
+                        try:
+                            post_header = b""
+                            try:
+                                with open(encrypted_file, 'rb') as f:
+                                    f.seek(offset)
+                                    post_header = f.read(256)
+                            except (IOError, OSError, PermissionError) as e:
+                                result["errors"].append(f"Error reading file at offset {offset}: {e}")
+                                continue
+                            
+                            if len(post_header) >= 16:
+                                try:
+                                    post_header_entropy = entropy_analyzer.calculate_entropy(post_header[:16])
+                                    
+                                    # If entropy jumps at this offset, likely a header boundary
+                                    if abs(post_header_entropy - header_entropy) > 1.0:
+                                        result["params"]["header_size"] = offset
+                                        break
+                                except Exception as e:
+                                    result["errors"].append(f"Error calculating post-header entropy at offset {offset}: {e}")
+                        except Exception as e:
+                            result["errors"].append(f"Error processing offset {offset} for header detection: {e}")
+                except Exception as e:
+                    result["errors"].append(f"Error during header detection: {e}")
             
             # Perform algorithm-specific parameter adjustments
             self._adjust_algorithm_params(result)
@@ -1579,25 +1686,60 @@ class AlgorithmDetector:
         Returns:
             Shannon entropy value (0.0 to 8.0)
         """
-        if not data:
-            return 0
+        try:
+            # Handle empty or invalid data
+            if not data:
+                return 0
+                
+            if not isinstance(data, bytes):
+                # Try to convert to bytes if possible
+                try:
+                    data = bytes(data)
+                except (TypeError, ValueError):
+                    # If conversion fails, return a default value
+                    return 5.0  # Middle-of-the-road value
             
-        # Calculate byte frequency
-        counter = {}
-        for byte in data:
-            if byte not in counter:
-                counter[byte] = 0
-            counter[byte] += 1
-        
-        # Calculate entropy
-        import math
-        entropy = 0
-        length = len(data)
-        for count in counter.values():
-            probability = count / length
-            entropy -= probability * (math.log(probability) / math.log(2))
-        
-        return entropy
+            # Calculate byte frequency with error handling
+            counter = {}
+            try:
+                for byte in data:
+                    if byte not in counter:
+                        counter[byte] = 0
+                    counter[byte] += 1
+            except Exception:
+                # If we can't iterate through data, use a simpler approach
+                try:
+                    # Try with bytearray conversion
+                    for byte in bytearray(data):
+                        if byte not in counter:
+                            counter[byte] = 0
+                        counter[byte] += 1
+                except Exception:
+                    # If all else fails, return a default value
+                    return 5.0
+            
+            # Safety check
+            if not counter or len(data) == 0:
+                return 0
+            
+            # Calculate entropy
+            try:
+                import math
+                entropy = 0
+                length = len(data)
+                for count in counter.values():
+                    probability = count / length
+                    entropy -= probability * (math.log(probability) / math.log(2))
+                
+                # Cap entropy at 8.0 for sanity
+                return min(entropy, 8.0)
+            except Exception:
+                # If math operations fail, return a default value
+                return 5.0
+                
+        except Exception:
+            # Catch-all for any unforeseen errors
+            return 5.0
     
     def _adjust_algorithm_params(self, result: Dict[str, Any]) -> None:
         """
@@ -1634,71 +1776,107 @@ class AlgorithmDetector:
         Args:
             result: Detection result to enhance
         """
-        family = result.get("family") or result["params"].get("detected_family")
-        if not family:
-            return
+        try:
+            # Safely get family with error handling
+            family = None
+            try:
+                family = result.get("family")
+                if not family and "params" in result:
+                    family = result["params"].get("detected_family")
+            except Exception as e:
+                if "errors" in result:
+                    result["errors"].append(f"Error getting family from result: {e}")
+                return
+                
+            if not family:
+                return
+                
+            # Safely convert to lowercase
+            try:
+                family = family.lower()
+            except (AttributeError, TypeError) as e:
+                if "errors" in result:
+                    result["errors"].append(f"Error converting family to lowercase: {e}")
+                return
             
-        family = family.lower()
+            # Retrieve algorithm
+            algorithm = result.get("algorithm", "aes-cbc")
+            
+            # Apply family-specific parameters with error handling
+            try:
+                if family == "ryuk":
+                    # Ryuk uses AES-ECB with 8-byte header
+                    result["params"]["header_size"] = 8
+                    # No IV needed for ECB mode
+                    result["params"]["iv_in_file"] = False
+                
+                elif family == "lockbit":
+                    # LockBit uses AES-CBC with IV in header
+                    result["params"]["header_size"] = 128
+                    result["params"]["iv_in_file"] = True
+                    result["params"]["iv_offset"] = 56
+                    result["params"]["iv_size"] = 16
+                
+                elif family == "blackcat" or family == "alphv":
+                    # BlackCat uses ChaCha20 with 256-byte header
+                    result["params"]["header_size"] = 256
+                    result["params"]["nonce_size"] = 12
+                
+                elif family == "wannacry" or family == "wanacryptor":
+                    # WannaCry uses AES-CBC with complex header
+                    result["params"]["header_size"] = 0x200  # 512 bytes
+                    result["params"]["iv_in_file"] = True
+                    result["params"]["iv_offset"] = 0x20     # IV at offset 32
+                    result["params"]["iv_size"] = 16
+                
+                elif family == "revil" or family == "sodinokibi":
+                    # REvil/Sodinokibi uses Salsa20 and/or AES-CBC
+                    if algorithm == "salsa20":
+                        result["params"]["header_size"] = 16
+                        result["params"]["nonce_size"] = 8
+                    else:  # AES-CBC
+                        result["params"]["header_size"] = 16
+                        result["params"]["iv_in_file"] = True
+                        result["params"]["iv_offset"] = 0
+                        result["params"]["iv_size"] = 16
+                
+                elif family == "djvu" or family == "stop":
+                    # STOP/Djvu uses Salsa20
+                    result["params"]["header_size"] = 0x258  # 600 bytes
+                    result["params"]["nonce_size"] = 8
+                
+                elif family == "conti":
+                    # Conti uses AES-CBC
+                    result["params"]["header_size"] = 8
+                    result["params"]["iv_in_file"] = True
+                    result["params"]["iv_offset"] = 8
+                    result["params"]["iv_size"] = 16
+                
+                elif family == "maze":
+                    # Maze uses ChaCha20
+                    result["params"]["header_size"] = 64
+                    result["params"]["nonce_size"] = 12
+                
+                elif family == "rhysida":
+                    # Rhysida uses AES-CBC with IV
+                    result["params"]["header_size"] = 280
+                    result["params"]["iv_in_file"] = True
+                    result["params"]["iv_offset"] = 264
+                    result["params"]["iv_size"] = 16
+                    
+                # Record that we applied family-specific parameters
+                result["params"]["applied_family_params"] = True
+                result["params"]["family_used"] = family
+                
+            except Exception as e:
+                # Error applying family-specific parameters
+                if "errors" in result:
+                    result["errors"].append(f"Error applying parameters for family '{family}': {e}")
         
-        if family == "ryuk":
-            # Ryuk uses AES-ECB with 8-byte header
-            result["params"]["header_size"] = 8
-            # No IV needed for ECB mode
-            result["params"]["iv_in_file"] = False
-        
-        elif family == "lockbit":
-            # LockBit uses AES-CBC with IV in header
-            result["params"]["header_size"] = 128
-            result["params"]["iv_in_file"] = True
-            result["params"]["iv_offset"] = 56
-            result["params"]["iv_size"] = 16
-        
-        elif family == "blackcat" or family == "alphv":
-            # BlackCat uses ChaCha20 with 256-byte header
-            result["params"]["header_size"] = 256
-            result["params"]["nonce_size"] = 12
-        
-        elif family == "wannacry" or family == "wanacryptor":
-            # WannaCry uses AES-CBC with complex header
-            result["params"]["header_size"] = 0x200  # 512 bytes
-            result["params"]["iv_in_file"] = True
-            result["params"]["iv_offset"] = 0x20     # IV at offset 32
-            result["params"]["iv_size"] = 16
-        
-        elif family == "revil" or family == "sodinokibi":
-            # REvil/Sodinokibi uses Salsa20 and/or AES-CBC
-            if result["algorithm"] == "salsa20":
-                result["params"]["header_size"] = 16
-                result["params"]["nonce_size"] = 8
-            else:  # AES-CBC
-                result["params"]["header_size"] = 16
-                result["params"]["iv_in_file"] = True
-                result["params"]["iv_offset"] = 0
-                result["params"]["iv_size"] = 16
-        
-        elif family == "djvu" or family == "stop":
-            # STOP/Djvu uses Salsa20
-            result["params"]["header_size"] = 0x258  # 600 bytes
-            result["params"]["nonce_size"] = 8
-        
-        elif family == "conti":
-            # Conti uses AES-CBC
-            result["params"]["header_size"] = 8
-            result["params"]["iv_in_file"] = True
-            result["params"]["iv_offset"] = 8
-            result["params"]["iv_size"] = 16
-        
-        elif family == "maze":
-            # Maze uses ChaCha20
-            result["params"]["header_size"] = 64
-            result["params"]["nonce_size"] = 12
-        
-        elif family == "rhysida":
-            # Rhysida uses AES-CBC with IV
-            result["params"]["header_size"] = 280
-            result["params"]["iv_in_file"] = True
-            result["params"]["iv_offset"] = 264
-            result["params"]["iv_size"] = 16
+        except Exception as e:
+            # Catch-all for unexpected errors
+            if "errors" in result:
+                result["errors"].append(f"Unexpected error in _add_family_specific_params: {e}")
 
 
 class StreamingDecryptionEngine:
@@ -2041,12 +2219,12 @@ class StreamingDecryptionEngine:
         
         return results
     
-    def _get_family_config(self, family: str, key: bytes, **kwargs) -> Tuple[str, Dict[str, Any]]:
+    def _get_family_config(self, family: Optional[str], key: bytes, **kwargs) -> Tuple[str, Dict[str, Any]]:
         """
         Get encryption algorithm and parameters for a ransomware family
         
         Args:
-            family: Ransomware family name
+            family: Ransomware family name (optional)
             key: Decryption key
             **kwargs: Additional parameters
             
@@ -2066,10 +2244,11 @@ class StreamingDecryptionEngine:
         # Override with provided params
         params.update(kwargs)
         
-        # Configure based on family
-        family = family.lower()
+        # Configure based on family if provided
+        if family is not None:
+            family = family.lower()
         
-        if family == "blackcat" or family == "alphv":
+        if family and (family == "blackcat" or family == "alphv"):
             # BlackCat primarily uses ChaCha20 or AES-256
             # The header contains the algorithm type at offset 4
             # 1 for ChaCha20, 2 for AES-256
@@ -2088,7 +2267,7 @@ class StreamingDecryptionEngine:
             # BlackCat has a 256-byte header
             params["header_size"] = kwargs.get("header_size", 256)
         
-        elif family == "lockbit":
+        elif family and family == "lockbit":
             # LockBit uses AES-CBC with the IV in the header
             algorithm = "aes-cbc"
             
@@ -2113,12 +2292,12 @@ class StreamingDecryptionEngine:
             params["iv_size"] = kwargs.get("iv_size", 16)
             params["iv_in_file"] = kwargs.get("iv_in_file", True)
         
-        elif family == "ryuk":
+        elif family and family == "ryuk":
             # Ryuk uses AES-ECB (simple)
             algorithm = "aes-ecb"
             params["header_size"] = kwargs.get("header_size", 8)
         
-        elif family == "revil" or family == "sodinokibi":
+        elif family and (family == "revil" or family == "sodinokibi"):
             # REvil/Sodinokibi uses AES-CBC with IV in the header
             algorithm = "aes-cbc"
             params["header_size"] = kwargs.get("header_size", 16)
@@ -2126,7 +2305,7 @@ class StreamingDecryptionEngine:
             params["iv_offset"] = kwargs.get("iv_offset", 0)
             params["iv_size"] = kwargs.get("iv_size", 16)
         
-        elif family == "rhysida":
+        elif family and family == "rhysida":
             # Rhysida uses AES-CBC with IV in the header
             algorithm = "aes-cbc"
             
@@ -2136,7 +2315,7 @@ class StreamingDecryptionEngine:
             params["iv_offset"] = kwargs.get("iv_offset", 264)
             params["iv_size"] = kwargs.get("iv_size", 16)
         
-        elif family == "wannacry":
+        elif family and family == "wannacry":
             # WannaCry uses AES-CBC with a complex header
             algorithm = "aes-cbc"
             params["header_size"] = kwargs.get("header_size", 0x200)  # 512 bytes
@@ -2144,12 +2323,12 @@ class StreamingDecryptionEngine:
             params["iv_offset"] = kwargs.get("iv_offset", 0x20)        # IV at offset 32
             params["iv_size"] = kwargs.get("iv_size", 16)
         
-        elif family == "djvu" or family == "stop":
+        elif family and (family == "djvu" or family == "stop"):
             # STOP/Djvu uses Salsa20
             algorithm = "salsa20"
             params["header_size"] = kwargs.get("header_size", 0x258)  # 600 bytes
         
-        elif family == "conti":
+        elif family and family == "conti":
             # Conti uses AES-CBC
             algorithm = "aes-cbc"
             params["header_size"] = kwargs.get("header_size", 8)

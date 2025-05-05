@@ -118,3 +118,65 @@ python adaptive_decryption.py --batch "samples/*.locked" --key-file key.bin --ou
 - **Higher Success Rate**: Multiple detection strategies and retry mechanisms significantly increase decryption success
 - **Improved Efficiency**: Parallel processing and learning from past successes optimize large batch operations
 - **Better Unknown Variant Handling**: Can effectively decrypt files from unknown ransomware variants by analyzing their characteristics
+
+## Enhanced Error Handling and Resilience
+
+The Universal Streaming Engine has been significantly improved with robust error handling mechanisms, making it more resilient when processing corrupted or malformed encrypted files.
+
+### Key Improvements
+
+1. **Comprehensive Error Tracking**
+   - Added "errors" array to detection results to track all encountered issues
+   - Granular error reporting for specific processing stages
+   - Ability to continue processing despite non-critical errors
+
+2. **Robust File Analysis**
+   - Improved file existence and accessibility checks
+   - Safer file reading with specific exception handling
+   - Graceful handling of partial or corrupted files
+   - Multiple-stage protection against file reading errors
+
+3. **Resilient Algorithm Detection**
+   - Enhanced signature checking with type safety and bounds checking
+   - Improved entropy calculation with fallback implementations
+   - Isolating pattern matching errors to prevent complete detection failure
+   - Fallback mechanisms when external dependencies are unavailable
+
+4. **Family Parameter Handling**
+   - Safe handling of None-type family parameters
+   - Type-checking for family name processing
+   - Protected family-specific parameter application
+   - Detailed tracking of applied parameters
+
+5. **Runtime Safety Features**
+   - Default values when calculations fail
+   - Safe type conversions with error recovery
+   - Nested exception handling for maximum reliability
+   - Algorithm-specific error isolation
+
+### Benefits
+
+- **Increased Reliability**: Successfully processes damaged or non-standard encrypted files
+- **Better Diagnostics**: Detailed error information helps identify specific issues
+- **Reduced Failures**: Continues operation even with partial information
+- **Dependency Tolerance**: Functions even when optional dependencies are missing
+- **Improved Transparency**: Errors are tracked but don't prevent results from being returned
+
+### Usage Example
+
+```python
+from decryption_tools.streaming_engine import AlgorithmDetector
+
+detector = AlgorithmDetector()
+result = detector.detect_algorithm("corrupted_encrypted_file.locked")
+
+# Check for any errors encountered during detection
+if "errors" in result and result["errors"]:
+    print("Detection completed with the following issues:")
+    for error in result["errors"]:
+        print(f" - {error}")
+
+# Algorithm detection still provides results even with errors
+print(f"Detected algorithm: {result['algorithm']} (confidence: {result['confidence']:.2f})")
+print(f"Detected parameters: {result['params']}")
+```
