@@ -31,6 +31,7 @@
 - **Multi-Ransomware Recovery Framework**: Unified approach to handling different ransomware families
 - **Binary Analysis Tools**: Identifies weaknesses in ransomware implementations to enable decryption
 - **Partial Recovery Capabilities**: Recovers data even when complete decryption isn't possible
+- **Cost-Optimized LLM Analysis**: Advanced ransomware analysis using large language models with intelligent provider selection to minimize operational costs while maximizing analysis quality
 
 ## Project Structure
 
@@ -42,6 +43,12 @@ innora-defender/
 │   ├── memory/                # Memory forensics for key extraction
 │   ├── static/                # Binary analysis tools
 ├── threat_intel/              # Ransomware family information
+├── ai_detection/              # AI-based detection and analysis
+│   ├── llm_service/           # Cost-optimized LLM service
+│   │   ├── config/            # Service configuration
+│   │   ├── cli.py             # Command-line interface
+│   │   ├── llm_provider_manager.py # Multi-provider LLM manager
+│   │   └── ransomware_analyzer.py  # Specialized ransomware analyzer
 ├── utils/                     # Common utilities and helper functions
 └── docs/                      # Documentation and technical guides
 ```
@@ -251,6 +258,49 @@ print(f"Weaknesses found: {len(results['weaknesses'])}")
 print(f"Potential keys: {len(results['potential_keys'])}")
 ```
 
+### LLM-Powered Ransomware Analysis
+
+```python
+from ai_detection.llm_service import RansomwareAnalyzer
+
+# Initialize the LLM-based analyzer
+analyzer = RansomwareAnalyzer()
+
+# Analyze a ransomware sample (optionally with upstream results)
+result = analyzer.analyze(
+    sample_path="path/to/ransomware_sample.bin",
+    upstream_results={  # Optional: results from other detection systems
+        "family": "LockBit",
+        "confidence": 0.75,
+        "key_features": ["Registry modifications", "Command and control traffic"]
+    }
+)
+
+# Access analysis results
+print(f"LLM-detected family: {result['llm_family']}")
+print(f"Confidence score: {result['confidence']}")
+print(f"Variant details: {result['variant_details']}")
+
+# Access potential weaknesses identified by the LLM
+for weakness in result.get("potential_weaknesses", []):
+    print(f"Potential weakness: {weakness['description']}")
+    print(f"Exploitation difficulty: {weakness['difficulty']}")
+    print(f"Recommended approach: {weakness['approach']}")
+```
+
+You can also use the command-line interface:
+
+```bash
+# Analyze a ransomware sample with detailed output
+python -m ai_detection.llm_service.cli analyze --sample path/to/ransomware.bin --detail high
+
+# Batch analyze multiple samples
+python -m ai_detection.llm_service.cli batch --input samples.json --output results.json
+
+# View cost and usage statistics
+python -m ai_detection.llm_service.cli stats
+```
+
 ## Documentation
 
 For detailed documentation, see the `docs/` directory:
@@ -268,6 +318,7 @@ For detailed documentation, see the `docs/` directory:
 - [Ransomware Relationship Graph](docs/RANSOMWARE_RELATIONSHIP_GRAPH.md) - Visualizing connections between ransomware families
 - [Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md) - Technical overview of the project
 - [Project Overview](docs/PROJECT_OVERVIEW.md) - Architecture and design principles
+- [LLM Service Optimization](docs/LLM_SERVICE_OPTIMIZATION.md) - Cost-efficient LLM integration for ransomware analysis
 
 ### Machine Learning Documentation
 - [Machine Learning Enhancement](docs/MACHINE_LEARNING_ENHANCEMENT.md) - AI-based detection capabilities

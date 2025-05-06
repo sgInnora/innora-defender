@@ -31,6 +31,7 @@
 - **多勒索软件恢复框架**：处理不同勒索软件家族的统一方法
 - **二进制分析工具**：识别勒索软件实现中的弱点，实现解密
 - **部分恢复能力**：即使在无法完全解密的情况下也能恢复数据
+- **成本优化LLM分析**：使用大型语言模型进行高级勒索软件分析，通过智能提供商选择最小化运营成本，同时最大化分析质量
 
 ## 项目结构
 
@@ -42,6 +43,12 @@ innora-defender/
 │   ├── memory/                # 用于密钥提取的内存取证
 │   ├── static/                # 二进制分析工具
 ├── threat_intel/              # 勒索软件家族信息
+├── ai_detection/              # 基于AI的检测和分析
+│   ├── llm_service/           # 成本优化LLM服务
+│   │   ├── config/            # 服务配置
+│   │   ├── cli.py             # 命令行界面
+│   │   ├── llm_provider_manager.py # 多提供商LLM管理器
+│   │   └── ransomware_analyzer.py  # 专业勒索软件分析器
 ├── utils/                     # 通用工具和辅助函数
 └── docs/                      # 文档和技术指南
 ```
@@ -151,6 +158,49 @@ print(f"发现的弱点: {len(results['weaknesses'])}")
 print(f"潜在密钥: {len(results['potential_keys'])}")
 ```
 
+### 基于LLM的勒索软件分析
+
+```python
+from ai_detection.llm_service import RansomwareAnalyzer
+
+# 初始化基于LLM的分析器
+analyzer = RansomwareAnalyzer()
+
+# 分析勒索软件样本（可选择提供上游结果）
+result = analyzer.analyze(
+    sample_path="path/to/ransomware_sample.bin",
+    upstream_results={  # 可选：来自其他检测系统的结果
+        "family": "LockBit",
+        "confidence": 0.75,
+        "key_features": ["注册表修改", "命令与控制流量"]
+    }
+)
+
+# 访问分析结果
+print(f"LLM检测到的家族: {result['llm_family']}")
+print(f"置信度分数: {result['confidence']}")
+print(f"变种细节: {result['variant_details']}")
+
+# 访问LLM识别的潜在弱点
+for weakness in result.get("potential_weaknesses", []):
+    print(f"潜在弱点: {weakness['description']}")
+    print(f"利用难度: {weakness['difficulty']}")
+    print(f"推荐方法: {weakness['approach']}")
+```
+
+您还可以使用命令行界面：
+
+```bash
+# 使用详细输出分析勒索软件样本
+python -m ai_detection.llm_service.cli analyze --sample path/to/ransomware.bin --detail high
+
+# 批量分析多个样本
+python -m ai_detection.llm_service.cli batch --input samples.json --output results.json
+
+# 查看成本和使用统计
+python -m ai_detection.llm_service.cli stats
+```
+
 ## 文档
 
 详细文档请参见 `docs/` 目录：
@@ -164,6 +214,7 @@ print(f"潜在密钥: {len(results['potential_keys'])}")
 - [勒索软件关系图](docs/RANSOMWARE_RELATIONSHIP_GRAPH.md) - 勒索软件家族间连接可视化
 - [实现概要](docs/IMPLEMENTATION_SUMMARY_CN.md) - 项目技术概述
 - [项目概览](docs/PROJECT_OVERVIEW_CN.md) - 架构和设计原则
+- [LLM服务优化](docs/LLM_SERVICE_OPTIMIZATION.md) - 勒索软件分析的成本高效LLM集成
 
 ### 机器学习文档
 - [机器学习增强](docs/MACHINE_LEARNING_ENHANCEMENT_CN.md) - 基于AI的检测能力

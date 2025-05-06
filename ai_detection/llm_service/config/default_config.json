@@ -1,0 +1,28 @@
+{
+  "enabled": true,
+  "provider_priority": ["vllm", "qianwen_fast", "qianwen_detail", "anthropic", "openai"],
+  "rate_limit": 10,
+  "request_interval": 0.1,
+  "health_check_interval": 3600,
+  "cache_results": true,
+  "cache_directory": "~/.innora/cache/llm",
+  "max_parallel_requests": 5,
+  "default_region": "global",
+  "region_override_map": {},
+  "use_regional_optimization": true,
+  "auto_fallback": true,
+  "detect_models": true,
+  "cost_tracking": true,
+  "performance_tracking": true,
+  "usage_log_file": "/tmp/innora_llm_usage_log.jsonl",
+  "save_stats_on_exit": true,
+  "stats_file": "/tmp/innora_llm_stats.json",
+  
+  "analyzer": {
+    "cache_ttl": 86400,
+    "max_tokens": 4000,
+    "temperature": 0.3,
+    "cache_enabled": true,
+    "use_vllm_priority": true
+  }
+}
